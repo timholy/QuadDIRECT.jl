@@ -132,3 +132,20 @@ end
     @test [x.f for x in mes[2]] == [0.0]
 end
 
+@testset "Sweeps" begin
+    splits = ([-2, 0, 2], [-1, 0, 1])
+    lower, upper = [-2.75, -1.9], [3.0, 2.0]
+    box, x0, xstar = QuadDIRECT.init(camel, splits, lower, upper)
+    r1 = QuadDIRECT.get_root(box)
+    QuadDIRECT.sweep!(r1, camel, x0, splits, lower, upper)
+
+    splits = ([-2, 0, 2], [-1, 0, 1])
+    lower, upper = [-Inf, -Inf], [Inf, Inf]
+    box, x0, xstar = QuadDIRECT.init(camel, splits, lower, upper)
+    r2 = QuadDIRECT.get_root(box)
+    QuadDIRECT.sweep!(r2, camel, x0, splits, lower, upper)
+
+    mn1, mx1 = extrema(r1)
+    mn2, mx2 = extrema(r2)
+    @test mn1 < mn2
+end
