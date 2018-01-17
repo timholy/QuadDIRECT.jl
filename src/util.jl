@@ -46,7 +46,7 @@ function Base.insert!(mel::MELink, w, lf::Pair)
     l, f = lf
     prev, next = mel, mel.next
     while prev != next && w > next.w
-        if f < next.f
+        if f <= next.f
             next = dropnext!(prev, next)
         else
             prev = next

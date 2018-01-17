@@ -32,6 +32,10 @@ using Base.Test
     @test [x.w for x in me] == [10]
     @test [x.f for x in me] == [-1]
     @test [x.l for x in me] == ['g']
+    insert!(me, 11, 'i'=>-1)
+    @test [x.w for x in me] == [11]
+    @test [x.f for x in me] == [-1]
+    @test [x.l for x in me] == ['i']
 
     me = QuadDIRECT.MELink{Float64,Float64}(0)
     y = rand(20)
@@ -108,6 +112,15 @@ end
 end
 
 @testset "Building minimum edges" begin
+    splits = ([-2, 0, 2], [-1, 0, 1])
+    lower, upper = [-2.75, -1.9], [3.0, 2.0]
+    box, x0 = QuadDIRECT.init(camel, splits, lower, upper)
+    r = QuadDIRECT.get_root(box)
+    mes = QuadDIRECT.minimum_edges(r, x0, lower, upper)
+    @test [x.w for x in mes[1]] == [1.0]
+    @test [x.f for x in mes[1]] == [0.0]
+    @test [x.w for x in mes[2]] == [1.0, 2.0]
+    @test [x.f for x in mes[2]] == [0.0, camel([-2.0,0.0])]
     splits = ([-2, 0, 2], [-1, 0, 1])
     lower, upper = [-Inf, -Inf], [Inf, Inf]
     box, x0 = QuadDIRECT.init(camel, splits, lower, upper)
