@@ -254,10 +254,6 @@ struct DepthFirstLeafIterator{T} <: DepthFirstIterator
     root::Box{T}
 end
 
-struct VisitorState{T}
-    cparent::Box{T}
-    cindex::Int
-end
 struct VisitorBool{T}
     box::Box{T}
     done::Bool
@@ -268,40 +264,23 @@ function visit_leaves(root::Box)
 end
 
 function Base.start(iter::DepthFirstLeafIterator)
-    find_next_leaf(iter, VisitorState(iter.root, 0))
+    find_next_leaf(iter, VisitorBool(iter.root, false))
 end
 Base.start(root::Box) = VisitorBool(root, false)
 
-function Base.done(iter::DepthFirstLeafIterator, state::VisitorState)
-    isleaf(iter.root) && return true
-    iter.root == state.cparent && state.cindex > length(iter.root.children)
-end
+Base.done(iter::DepthFirstLeafIterator, state::VisitorBool) = state.done
 Base.done(root::Box, state::VisitorBool) = state.done
 
-function Base.next(iter::DepthFirstLeafIterator, state::VisitorState)
-    box = state.cparent.children[state.cindex]
-    @assert(isleaf(box))
-    return (box, find_next_leaf(iter, state))
+function Base.next(iter::DepthFirstLeafIterator, state::VisitorBool)
+    @assert(isleaf(state.box))
+    return (state.box, find_next_leaf(iter, state))
 end
-function find_next_leaf(iter::DepthFirstLeafIterator, state::VisitorState)
-    box, i = state.cparent, state.cindex+1
-    if i > length(box.children)
-        isroot(box) && return VisitorState(box, i)
-        box, i = up(box, iter.root)
+function find_next_leaf(iter::DepthFirstLeafIterator, state::VisitorBool)
+    _, state = next(iter.root, state)
+    while !isleaf(state.box) && !state.done
+        _, state = next(iter.root, state)
     end
-    if i <= length(box.children) && !isleaf(box.children[i])
-        return find_next_leaf(iter, VisitorState(box.children[i], 0))
-    end
-    VisitorState(box, i)
-end
-function up(box, root)
-    local i
-    while true
-        box, i = box.parent, box.parent_cindex+1
-        box == root && return (box, i)
-        i <= length(box.children) && break
-    end
-    return (box, i)
+    return state
 end
 
 function Base.next(root::Box, state::VisitorBool)
@@ -315,6 +294,16 @@ function Base.next(root::Box, state::VisitorBool)
         return (item, VisitorBool(root, true))
     end
     return (item, VisitorBool(item.children[1], false))
+end
+
+function up(box, root)
+    local i
+    while true
+        box, i = box.parent, box.parent_cindex+1
+        box == root && return (box, i)
+        i <= length(box.children) && break
+    end
+    return (box, i)
 end
 
 ## Utilities for working with both mutable and immutable vectors
