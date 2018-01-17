@@ -91,13 +91,26 @@ function Base.show(io::IO, box::Box)
     print(io, "Box@", x)
 end
 
-function add_children!(parent::Box, splitdim, xvalues, fvalues, u, v)
+function treeprint(io::IO, root::Box)
+    show(io, root)
+    if !isleaf(root)
+        print(io, '(')
+        treeprint(io, root.children[1])
+        print(io, ", ")
+        treeprint(io, root.children[2])
+        print(io, ", ")
+        treeprint(io, root.children[3])
+        print(io, ')')
+    end
+end
+
+function add_children!(parent::Box, splitdim, xvalues, fvalues, u::Real, v::Real)
     isleaf(parent) || error("cannot add children to non-leaf node")
     (length(xvalues) == 3 && xvalues[1] < xvalues[2] < xvalues[3]) || throw(ArgumentError("xvalues must be monotonic, got $xvalues"))
     parent.splitdim = splitdim
     p = find_parent_with_splitdim(parent, splitdim)
     if isroot(p)
-        parent.minmax = (u[splitdim], v[splitdim])
+        parent.minmax = (u, v)
     else
         parent.minmax = boxbounds(p)
     end
@@ -109,6 +122,15 @@ function add_children!(parent::Box, splitdim, xvalues, fvalues, u, v)
     parent
 end
 
+function cycle_free(box)
+    p = parent(box)
+    while !isroot(p)
+        p == box && return false
+        p = p.parent
+    end
+    return true
+end
+
 function find_parent_with_splitdim(box::Box, splitdim::Integer)
     while !isroot(box)
         p = parent(box)
@@ -118,6 +140,16 @@ function find_parent_with_splitdim(box::Box, splitdim::Integer)
         box = p
     end
     return box
+end
+
+function find_smallest_child_leaf(box::Box)
+    # Not guaranteed to be the smallest function value, it's the smallest that can be
+    # reached stepwise
+    while !isleaf(box)
+        idx = indmin(box.fvalues)
+        box = box.children[idx]
+    end
+    box
 end
 
 function boxbounds(box::Box)
@@ -137,6 +169,7 @@ function boxbounds(box::Box, lower::Real, upper::Real)
     return boxbounds(box)
 end
 
+position(box::Box) = position!(fill(NaN, ndims(box)), box)
 function position!(x, box::Box)
     flag = falses(length(x))
     position!(x, flag, box)
@@ -156,6 +189,35 @@ function position!(x, flag, box::Box)
     end
     x
 end
+function default_position!(x, flag, xdefault)
+    length(x) == length(flag) == length(xdefault) || throw(DimensionMismatch("all three inputs must have the same length"))
+    for i = 1:length(x)
+        if !flag[i]
+            x[i] = xdefault[i]
+        end
+    end
+    x
+end
+
+function boxbounds!(bb, box::Box)
+    flag = falses(ndims(box))
+    position!(bb, flag, box)
+    return bb
+end
+function boxbounds!(bb, flag, box::Box)
+    fill!(flag, false)
+    nfilled = 0
+    while !isroot(box) && nfilled < ndims(box)
+        i = box.parent.splitdim
+        if !flag[i]
+            bb[i] = box.parent.minmax
+            flag[i] = true
+            nfilled += 1
+        end
+        box = box.parent
+    end
+    bb
+end
 
 function width(box::Box, splitdim::Integer, xdefault::Real, lower::Real, upper::Real)
     p = find_parent_with_splitdim(box, splitdim)
@@ -166,6 +228,18 @@ end
 width(box::Box, splitdim::Integer, xdefault, lower, upper) =
     width(box, splitdim, xdefault[splitdim], lower[splitdim], upper[splitdim])
 
+function Base.extrema(root::Box)
+    isleaf(root) && error("tree is empty")
+    minv, maxv = extrema(root.fvalues)
+    for bx in root
+        isleaf(bx) && continue
+        mn, mx = extrema(bx.fvalues)
+        minv = min(minv, mn)
+        maxv = max(maxv, mx)
+    end
+    minv, maxv
+end
+
 ## Tree traversal
 function get_root(box::Box)
     while !isroot(box)
@@ -174,40 +248,51 @@ function get_root(box::Box)
     box
 end
 
-struct DepthFirstIterator{T}
+abstract type DepthFirstIterator end
+
+struct DepthFirstLeafIterator{T} <: DepthFirstIterator
     root::Box{T}
 end
-struct DepthFirstState{T}
+
+struct VisitorState{T}
     cparent::Box{T}
     cindex::Int
 end
+struct VisitorBool{T}
+    box::Box{T}
+    done::Bool
+end
 
 function visit_leaves(root::Box)
-    DepthFirstIterator(root)
+    DepthFirstLeafIterator(root)
 end
 
-function Base.start(iter::DepthFirstIterator)
-    find_next_leaf(iter, DepthFirstState(iter.root, 0))
+function Base.start(iter::DepthFirstLeafIterator)
+    find_next_leaf(iter, VisitorState(iter.root, 0))
 end
-function Base.done(iter::DepthFirstIterator, state::DepthFirstState)
+Base.start(root::Box) = VisitorBool(root, false)
+
+function Base.done(iter::DepthFirstLeafIterator, state::VisitorState)
     isleaf(iter.root) && return true
     iter.root == state.cparent && state.cindex > length(iter.root.children)
 end
-function Base.next(iter::DepthFirstIterator, state::DepthFirstState)
+Base.done(root::Box, state::VisitorBool) = state.done
+
+function Base.next(iter::DepthFirstLeafIterator, state::VisitorState)
     box = state.cparent.children[state.cindex]
     @assert(isleaf(box))
     return (box, find_next_leaf(iter, state))
 end
-function find_next_leaf(iter::DepthFirstIterator, state::DepthFirstState)
+function find_next_leaf(iter::DepthFirstLeafIterator, state::VisitorState)
     box, i = state.cparent, state.cindex+1
     if i > length(box.children)
-        isroot(box) && return DepthFirstState(box, i)
+        isroot(box) && return VisitorState(box, i)
         box, i = up(box, iter.root)
     end
     if i <= length(box.children) && !isleaf(box.children[i])
-        return find_next_leaf(iter, DepthFirstState(box.children[i], 0))
+        return find_next_leaf(iter, VisitorState(box.children[i], 0))
     end
-    DepthFirstState(box, i)
+    VisitorState(box, i)
 end
 function up(box, root)
     local i
@@ -217,6 +302,19 @@ function up(box, root)
         i <= length(box.children) && break
     end
     return (box, i)
+end
+
+function Base.next(root::Box, state::VisitorBool)
+    item, done = state.box, state.done
+    if isleaf(item)
+        box, i = up(item, root)
+        if i <= length(box.children)
+            return (item, VisitorBool(box.children[i], false))
+        end
+        @assert(box == root)
+        return (item, VisitorBool(root, true))
+    end
+    return (item, VisitorBool(item.children[1], false))
 end
 
 ## Utilities for working with both mutable and immutable vectors
@@ -229,3 +327,22 @@ _rps(::Tuple{}, i, val) = ()
 
 ipcopy!(dest, src) = copy!(dest, src)
 ipcopy!(dest::SVector, src) = src
+
+## Other utilities
+lohi(x, y) = x <= y ? (x, y) : (y, x)
+function lohi(x, y, z)
+    @assert(x <= y)
+    z <= x && return z, x, y
+    z <= y && return x, z, y
+    return x, y, z
+end
+
+function biggest_interval(a, b, c, d)
+    ab, bc, cd = b-a, c-b, d-c
+    if ab <= bc && ab <= cd
+        return (a, b)
+    elseif bc <= ab && bc <= cd
+        return (b, c)
+    end
+    return (c, d)
+end

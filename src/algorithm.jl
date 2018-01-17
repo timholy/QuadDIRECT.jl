@@ -15,27 +15,29 @@ function init(f, xsplits, lower::AbstractVector, upper::AbstractVector)
         xsi = xsplits[i]
         Tx = promote_type(Tx, typeof(xsi[1]), typeof(xsi[2]), typeof(xsi[3]))
     end
+    Tx = boxtype(Tx)
     x0 = Tx[x[2] for x in xsplits]
-    _init(f, x0, xsplits, lower, upper)
+    box, xstar = _init(f, copy(x0), xsplits, lower, upper)
+    box, x0, xstar
 end
 
-@noinline function _init(f, x0, xsplits, lower, upper)
-    T = promote_type(eltype(x0), eltype(lower), eltype(upper))
-    n = length(x0)
+@noinline function _init(f, xstar, xsplits, lower, upper)
+    T = boxtype(promote_type(eltype(xstar), eltype(lower), eltype(upper)))
+    n = length(xstar)
     root = box = Box{T,n}()
-    xtmp = copy(x0)
+    xtmp = copy(xstar)
     for i = 1:n
-        xtmp = ipcopy!(xtmp, x0)
-        box = split!(box, f, xtmp, i, xsplits[i], lower, upper)
-        x0 = replacecoordinate!(x0, i, box.parent.xvalues[box.parent_cindex])
+        xtmp = ipcopy!(xtmp, xstar)
+        box = split!(box, f, xtmp, i, xsplits[i], lower[i], upper[i])
+        xstar = replacecoordinate!(xstar, i, box.parent.xvalues[box.parent_cindex])
     end
-    box, x0
+    box, xstar
 end
 
-function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower, upper) where T
+function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real) where T
     # Evaluate f along the splits, keeping track of the best
-    fsplit = MVector3{T}(Inf, Inf, Inf)
-    fmin, idxmin = convert(T, Inf), 0
+    fsplit = MVector3{T}(typemax(T), typemax(T), typemax(T))
+    fmin, idxmin = typemax(T), 0
     for l = 1:3
         xtmp = replacecoordinate!(xtmp, splitdim, xsplit[l])
         ftmp = f(xtmp)

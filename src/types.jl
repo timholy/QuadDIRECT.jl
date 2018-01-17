@@ -60,6 +60,9 @@ end
 Base.convert(::Type{MVector3}, a::AbstractVector{T}) where T =
     convert(MVector3{T}, a)
 
+boxtype(::Type{<:Integer}) = Float64
+boxtype(::Type{T}) where T = T
+
 # TODO
 # 1. Define the Box structure
 # 2. Define traversal routines for extracting 3-pt approximations along coordinate axes

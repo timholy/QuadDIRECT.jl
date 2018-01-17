@@ -83,7 +83,7 @@ end
 
 @testset "Initialization" begin
     splits = ([-2, 0, 2], [-1, 0, 1])
-    box, x0 = QuadDIRECT.init(camel, splits, [-Inf, -Inf], [Inf, Inf])
+    box, x0, xstar = QuadDIRECT.init(camel, splits, [-Inf, -Inf], [Inf, Inf])
     @test x0 == [0, 0]
     @test box isa QuadDIRECT.Box{Float64}
     @test QuadDIRECT.isleaf(box)
@@ -114,7 +114,7 @@ end
 @testset "Building minimum edges" begin
     splits = ([-2, 0, 2], [-1, 0, 1])
     lower, upper = [-2.75, -1.9], [3.0, 2.0]
-    box, x0 = QuadDIRECT.init(camel, splits, lower, upper)
+    box, x0, xstar = QuadDIRECT.init(camel, splits, lower, upper)
     r = QuadDIRECT.get_root(box)
     mes = QuadDIRECT.minimum_edges(r, x0, lower, upper)
     @test [x.w for x in mes[1]] == [1.0]
@@ -123,7 +123,7 @@ end
     @test [x.f for x in mes[2]] == [0.0, camel([-2.0,0.0])]
     splits = ([-2, 0, 2], [-1, 0, 1])
     lower, upper = [-Inf, -Inf], [Inf, Inf]
-    box, x0 = QuadDIRECT.init(camel, splits, lower, upper)
+    box, x0, xstar = QuadDIRECT.init(camel, splits, lower, upper)
     r = QuadDIRECT.get_root(box)
     mes = QuadDIRECT.minimum_edges(r, x0, lower, upper)
     @test [x.w for x in mes[1]] == [1.0, Inf]
@@ -131,3 +131,4 @@ end
     @test [x.w for x in mes[2]] == [Inf]
     @test [x.f for x in mes[2]] == [0.0]
 end
+
