@@ -43,3 +43,13 @@ using Base.Test
     @test ntests > 1
     @test i == 21
 end
+
+@testset "Quadratic fit" begin
+    a, b, c = rand(), rand(), rand()
+    q(x) = a*x^2 + b*x + c
+    x1, x2, x3 = sort(rand(3))
+    xvert, fvert, qcoef = QuadDIRECT.qfit(x1=>q(x1), x2=>q(x2), x3=>q(x3))
+    @test qcoef ≈ a
+    @test xvert ≈ -b/(2a)
+end
+
