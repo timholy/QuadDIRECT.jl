@@ -2,7 +2,7 @@ using QuadDIRECT, StaticArrays
 using Base.Test
 
 @testset "MinimumEdge" begin
-    me = MELink{Float64,Float64}('z')
+    me = QuadDIRECT.MELink{Float64,Float64}('z')
     insert!(me, 1, 'a'=>1)
     insert!(me, 2, 'b'=>5)
     @test [x.w for x in me] == [1, 2]
@@ -17,7 +17,7 @@ using Base.Test
     @test [x.f for x in me] == [0]
     @test [x.l for x in me] == ['d']
 
-    me = MELink{Float64,Float64}(0)
+    me = QuadDIRECT.MELink{Float64,Float64}(0)
     y = rand(20)
     w = rand(20)
     for i = 1:20
@@ -75,7 +75,7 @@ end
     for i = 1:3
         @test p.xvalues[i] == splits[2][i]
         QuadDIRECT.position!(x, p.children[i])
-        @test x == [splits[1][2], splits[2][i]]
+        @test x == [splits[1][2], splits[2][i]]  # for this initialization, along 1st dim the minimum is in the middle
         @test p.fvalues[i] == camel(x)
     end
     p = p.parent
@@ -84,6 +84,6 @@ end
     @test length(p.children) == 3
     for i = 1:3
         @test p.xvalues[i] == splits[1][i]
-        @test p.fvalues[i] == camel([splits[1][i], 0.0])
+        @test p.fvalues[i] == camel([splits[1][i], splits[2][2]]) # perforce the 2nd coordinate is chosen from the middle
     end
 end
