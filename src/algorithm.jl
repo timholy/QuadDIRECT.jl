@@ -21,20 +21,20 @@ end
 
 @noinline function _init(f, x0, xsplits, lower, upper)
     T = promote_type(eltype(x0), eltype(lower), eltype(upper))
-    root = box = Box{T}()
     n = length(x0)
+    root = box = Box{T,n}()
     xtmp = copy(x0)
     for i = 1:n
         xtmp = ipcopy!(xtmp, x0)
         box = split!(box, f, xtmp, i, xsplits[i], lower, upper)
         x0 = replacecoordinate!(x0, i, box.parent.xvalues[box.parent_cindex])
     end
-    box
+    box, x0
 end
 
 function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower, upper) where T
     # Evaluate f along the splits, keeping track of the best
-    fsplit = Vector{T}(uninitialized, 3)
+    fsplit = MVector3{T}(Inf, Inf, Inf)
     fmin, idxmin = convert(T, Inf), 0
     for l = 1:3
         xtmp = replacecoordinate!(xtmp, splitdim, xsplit[l])
@@ -46,6 +46,21 @@ function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower, upper) where T
         fsplit[l] = ftmp
     end
     idxmin == 0 && error("function was not finite at any evaluation point")
-    add_children!(box, splitdim, copy(xsplit), fsplit, lower, upper)
+    if idxmin == 1 && fsplit[1] == fsplit[2]
+        idxmin = 2  # prefer the middle in case of ties
+    end
+    add_children!(box, splitdim, xsplit, fsplit, lower, upper)
     return box.children[idxmin]
+end
+
+# A dumb O(N) algorithm for building the minimum-edge structures
+function minimum_edges(root::Box{T,N}, x0, lower, upper) where {T,N}
+    mes = [MELink{T,T}(root) for i = 1:N]
+    for box in visit_leaves(root)
+        fval = box.parent.fvalues[box.parent_cindex]
+        for i = 1:N
+            insert!(mes[i], width(box, i, x0, lower, upper), box=>fval)
+        end
+    end
+    return mes
 end

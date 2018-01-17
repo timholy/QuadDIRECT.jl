@@ -25,7 +25,7 @@ mutable struct MELink{Tl,Tw,Tf}
     end
 end
 
-MELink{Tw,Tf}(dummylabel::Tl) where {Tl,Tw,Tf} = MELink{Tl,Tw,Tf}(dummylabel, 0, -Inf)
+MELink{Tw,Tf}(dummylabel::Tl) where {Tl,Tw,Tf} = MELink{Tl,Tw,Tf}(dummylabel, typemin(Tw), typemin(Tf))
 
 Base.iteratorsize(::Type{<:MELink}) = Base.SizeUnknown()
 
@@ -66,40 +66,42 @@ Base.convert(::Type{MVector3}, a::AbstractVector{T}) where T =
 # 3. Define split routines
 # 4. Define outer API (iteration and termination criteria)
 # 5. Consider collecting enough points to build the full quadratic model
-mutable struct Box{T}
-    parent::Box{T}
+mutable struct Box{T,N}
+    parent::Box{T,N}
     parent_cindex::Int    # of its parent's children, which one is this?
     splitdim::Int         # the dimension along which this box has been split, or 0 if this is a leaf node
     minmax::Tuple{T,T}    # the outer edges not corresponding to one of the parent's xvalues (splits that occur between dots in Fig 2)
     xvalues::MVector3{T}  # the values of x_splitdim at which f is evaluated
     fvalues::MVector3{T}  # the corresponding values of f
-    children::MVector3{Box{T}}
+    children::MVector3{Box{T,N}}
 
-    function default!(box::Box{T}) where T
+    function default!(box::Box{T,N}) where {T,N}
         box.minmax = (typemax(T), typemin(T))
         box.xvalues = MVector3{T}(typemax(T), zero(T), typemin(T))
         box.fvalues = MVector3{T}(zero(T), zero(T), zero(T))
         box.children = MVector3(box, box, box)
     end
-    function Box{T}() where T
+    function Box{T,N}() where {T,N}
         # Create the root box
-        box = new{T}()
+        box = new{T,N}()
         box.parent = box
         box.parent_cindex = 0
         box.splitdim = 0
         default!(box)
         return box
     end
-    function Box{T}(parent::Box, parent_cindex::Integer) where T
+    function Box{T,N}(parent::Box, parent_cindex::Integer) where {T,N}
         # Create a new child and store it in the parent
-        box = new{T}(parent, parent_cindex, 0)
+        box = new{T,N}(parent, parent_cindex, 0)
         parent.children[parent_cindex] = box
         default!(box)
         box
     end
 end
 
-Box(parent::Box{T}, parent_cindex::Integer) where T = Box{T}(parent, parent_cindex)
+Box(parent::Box{T,N}, parent_cindex::Integer) where {T,N} = Box{T,N}(parent, parent_cindex)
 
 isroot(box::Box) = box.parent == box
 isleaf(box::Box) = box.splitdim == 0
+Base.parent(box::Box) = box.parent
+Base.ndims(box::Box{T,N}) where {T,N} = N

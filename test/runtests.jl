@@ -16,6 +16,22 @@ using Base.Test
     @test [x.w for x in me] == [10]
     @test [x.f for x in me] == [0]
     @test [x.l for x in me] == ['d']
+    insert!(me, 10, 'e'=>1)
+    @test [x.w for x in me] == [10]
+    @test [x.f for x in me] == [0]
+    @test [x.l for x in me] == ['d']
+    insert!(me, 10, 'f'=>0)
+    @test [x.w for x in me] == [10]
+    @test [x.f for x in me] == [0]
+    @test [x.l for x in me] == ['d']
+    insert!(me, 10, 'g'=>-1)
+    @test [x.w for x in me] == [10]
+    @test [x.f for x in me] == [-1]
+    @test [x.l for x in me] == ['g']
+    insert!(me, 9, 'h'=>-1)
+    @test [x.w for x in me] == [10]
+    @test [x.f for x in me] == [-1]
+    @test [x.l for x in me] == ['g']
 
     me = QuadDIRECT.MELink{Float64,Float64}(0)
     y = rand(20)
@@ -63,13 +79,15 @@ end
 
 @testset "Initialization" begin
     splits = ([-2, 0, 2], [-1, 0, 1])
-    box = QuadDIRECT.init(camel, splits, [-Inf, -Inf], [Inf, Inf])
+    box, x0 = QuadDIRECT.init(camel, splits, [-Inf, -Inf], [Inf, Inf])
+    @test x0 == [0, 0]
     @test box isa QuadDIRECT.Box{Float64}
     @test QuadDIRECT.isleaf(box)
     @test !QuadDIRECT.isroot(box)
     p = box.parent
     @test !QuadDIRECT.isleaf(p)
     @test !QuadDIRECT.isroot(p)
+    @test p.minmax == (-Inf, Inf)
     @test length(p.children) == 3
     x = [NaN, NaN]
     for i = 1:3
@@ -81,9 +99,22 @@ end
     p = p.parent
     @test !QuadDIRECT.isleaf(p)
     @test QuadDIRECT.isroot(p)
+    @test p.minmax == (-Inf, Inf)
     @test length(p.children) == 3
     for i = 1:3
         @test p.xvalues[i] == splits[1][i]
         @test p.fvalues[i] == camel([splits[1][i], splits[2][2]]) # perforce the 2nd coordinate is chosen from the middle
     end
+end
+
+@testset "Building minimum edges" begin
+    splits = ([-2, 0, 2], [-1, 0, 1])
+    lower, upper = [-Inf, -Inf], [Inf, Inf]
+    box, x0 = QuadDIRECT.init(camel, splits, lower, upper)
+    r = QuadDIRECT.get_root(box)
+    mes = QuadDIRECT.minimum_edges(r, x0, lower, upper)
+    @test [x.w for x in mes[1]] == [1.0, Inf]
+    @test [x.f for x in mes[1]] == [0.0, camel([-2.0,0.0])]
+    @test [x.w for x in mes[2]] == [Inf]
+    @test [x.f for x in mes[2]] == [0.0]
 end
