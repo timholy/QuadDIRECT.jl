@@ -1,4 +1,4 @@
-using QuadDIRECT
+using QuadDIRECT, StaticArrays
 using Base.Test
 
 @testset "MinimumEdge" begin
@@ -53,3 +53,37 @@ end
     @test xvert ≈ -b/(2a)
 end
 
+function camel(x)
+    # 6-hump camel function. Typically evaluated over [-3,3] × [-2,2].
+    x1, x2 = x[1], x[2]
+    x1s = x1*x1
+    x2s = x2*x2
+    return (4 - 2.1*x1s + x1s*x1s/3)*x1s + x1*x2 + (-4 + 4*x2s)*x2s
+end
+
+@testset "Initialization" begin
+    splits = ([-2, 0, 2], [-1, 0, 1])
+    box = QuadDIRECT.init(camel, splits, [-Inf, -Inf], [Inf, Inf])
+    @test box isa QuadDIRECT.Box{Float64}
+    @test QuadDIRECT.isleaf(box)
+    @test !QuadDIRECT.isroot(box)
+    p = box.parent
+    @test !QuadDIRECT.isleaf(p)
+    @test !QuadDIRECT.isroot(p)
+    @test length(p.children) == 3
+    x = [NaN, NaN]
+    for i = 1:3
+        @test p.xvalues[i] == splits[2][i]
+        QuadDIRECT.position!(x, p.children[i])
+        @test x == [splits[1][2], splits[2][i]]
+        @test p.fvalues[i] == camel(x)
+    end
+    p = p.parent
+    @test !QuadDIRECT.isleaf(p)
+    @test QuadDIRECT.isroot(p)
+    @test length(p.children) == 3
+    for i = 1:3
+        @test p.xvalues[i] == splits[1][i]
+        @test p.fvalues[i] == camel([splits[1][i], 0.0])
+    end
+end

@@ -73,3 +73,78 @@ function Base.show(io::IO, mel::MELink)
     end
     print(io, ')')
 end
+
+
+## Box utilities
+function add_children!(parent::Box, splitdim, xvalues, fvalues, u, v)
+    isleaf(parent) || error("cannot add children to non-leaf node")
+    (length(xvalues) == 3 && xvalues[1] < xvalues[2] < xvalues[3]) || throw(ArgumentError("xvalues must be monotonic, got $xvalues"))
+    parent.splitdim = splitdim
+    p = find_parent_with_splitdim(parent, splitdim)
+    if isroot(p)
+        parent.minmax = (u[splitdim], v[splitdim])
+    else
+        parent.minmax = boxbounds(p)
+    end
+    parent.xvalues = xvalues
+    parent.fvalues = fvalues
+    for i = 1:3
+        Box(parent, i)
+    end
+    parent
+end
+
+function find_parent_with_splitdim(box::Box, splitdim::Integer)
+    while !isroot(box)
+        p = box.parent
+        if p.splitdim == splitdim
+            return box
+        end
+        box = p
+    end
+    return box
+end
+
+function boxbounds(box::Box)
+    isroot(box) && error("cannot compute bounds on root Box")
+    p = box.parent
+    if box.parent_cindex == 1
+        return (p.minmax[1], (p.xvalues[1]+p.xvalues[2])/2)
+    elseif box.parent_cindex == 2
+        return ((p.xvalues[1]+p.xvalues[2])/2, (p.xvalues[2]+p.xvalues[3])/2)
+    elseif box.parent_cindex == 3
+        return ((p.xvalues[2]+p.xvalues[3])/2, p.minmax[2])
+    end
+    error("invalid parent_cindex $(box.parent_cindex)")
+end
+
+function position!(x, box::Box)
+    flag = falses(length(x))
+    position!(x, flag, box)
+    return x
+end
+function position!(x, flag, box::Box)
+    fill!(flag, false)
+    nfilled = 0
+    while !isroot(box) && nfilled < length(x)
+        i = box.parent.splitdim
+        if !flag[i]
+            x[i] = box.parent.xvalues[box.parent_cindex]
+            flag[i] = true
+            nfilled += 1
+        end
+        box = box.parent
+    end
+    x
+end
+
+## Utilities for working with both mutable and immutable vectors
+replacecoordinate!(x, i::Integer, val) = (x[i] = val; x)
+
+replacecoordinate!(x::SVector{N,T}, i::Integer, val) where {N,T} =
+    SVector{N,T}(_rpc(Tuple(x), i-1, T(val)))
+@inline _rpc(t, i, val) = (ifelse(i == 0, val, t[1]), _rpc(tail(t), i-1, val)...)
+_rps(::Tuple{}, i, val) = ()
+
+ipcopy!(dest, src) = copy!(dest, src)
+ipcopy!(dest::SVector, src) = src
