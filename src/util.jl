@@ -134,6 +134,21 @@ function cycle_free(box)
     return true
 end
 
+function isparent(parent, child)
+    parent == child && return true
+    while !isroot(child)
+        child = child.parent
+        parent == child && return true
+    end
+    return false
+end
+
+"""
+    boxp = find_parent_with_splitdim(box, splitdim::Integer)
+
+Return the first node at or above `box` who's parent box was split
+along dimension `splitdim`.
+"""
 function find_parent_with_splitdim(box::Box, splitdim::Integer)
     while !isroot(box)
         p = parent(box)
@@ -145,6 +160,12 @@ function find_parent_with_splitdim(box::Box, splitdim::Integer)
     return box
 end
 
+"""
+    box = find_smallest_child_leaf(root)
+
+Walk the tree recursively, choosing the child with smallest function value at each stage.
+`box` will be a leaf node.
+"""
 function find_smallest_child_leaf(box::Box)
     # Not guaranteed to be the smallest function value, it's the smallest that can be
     # reached stepwise
@@ -155,30 +176,63 @@ function find_smallest_child_leaf(box::Box)
     box
 end
 
-function boxbounds(box::Box)
-    isroot(box) && error("cannot compute bounds on root Box")
-    p = parent(box)
-    if box.parent_cindex == 1
-        return (p.minmax[1], (p.xvalues[1]+p.xvalues[2])/2)
-    elseif box.parent_cindex == 2
-        return ((p.xvalues[1]+p.xvalues[2])/2, (p.xvalues[2]+p.xvalues[3])/2)
-    elseif box.parent_cindex == 3
-        return ((p.xvalues[2]+p.xvalues[3])/2, p.minmax[2])
+"""
+    box = find_leaf_at_edge(root, x, splitdim, dir)
+
+Return the leaf-node `box` that contains `x` with an edge at `x[splitdim]`.
+If `dir > 0`, a box to the right of the edge will be returned; if `dir < 0`, a box to the
+left will be returned.
+
+This is a useful utility for finding the neighbor of a given box. Example:
+
+    # Let's find the neighbors of `box` along its parent's splitdim
+    x = position(box, x0)
+    i = box.parent.splitdim
+    bb = boxbounds(box)
+    # Right neighbor
+    x[i] = bb[2]
+    rnbr = find_leaf_at_edge(root, x, i, +1)
+    # Left neighbor
+    x[i] = bb[1]
+    lnbr = find_leaf_at_edge(root, x, i, -1)
+"""
+function find_leaf_at_edge(root::Box, x, splitdim::Integer, dir::Signed)
+    isleaf(root) && return root
+    while !isleaf(root)
+        i = root.splitdim
+        found = false
+        for box in (root.children[1], root.children[2], root.children[3])
+            bb = boxbounds(box)
+            if within(x[i], bb, dir)
+                root = box
+                found = true
+                break
+            end
+        end
+        found || error("$(x[i]) not within $(root.minmax)")
     end
-    error("invalid parent_cindex $(box.parent_cindex)")
-end
-function boxbounds(box::Box, lower::Real, upper::Real)
-    isroot(box) && return (lower, upper)
-    return boxbounds(box)
+    root
 end
 
+"""
+    x = position(box)
+    x = position(box, x0)
+
+Return the n-dimensional position vector `x` at which this box was evaluated
+when it was a leaf. Some entries of `x` might be `NaN`, if `box` is sufficiently
+near the root and not all dimensions have been split.
+The variant supplying `x0` fills in those dimensions with the corresponding values
+from `x0`.
+"""
 position(box::Box) = position!(fill(NaN, ndims(box)), box)
+
 function position(box::Box, x0::AbstractVector)
     x = fill(NaN, ndims(box))
     flag = falses(length(x0))
     position!(x, flag, box)
     default_position!(x, flag, x0)
 end
+
 function position!(x, box::Box)
     flag = falses(length(x))
     position!(x, flag, box)
@@ -208,6 +262,47 @@ function default_position!(x, flag, xdefault)
     x
 end
 
+"""
+    left, right = boxbounds(box)
+
+Compute the bounds of `box` along the `splitdim` of `box`'s parent.
+This throws an error for the root box.
+"""
+function boxbounds(box::Box)
+    isroot(box) && error("cannot compute bounds on root Box")
+    p = parent(box)
+    if box.parent_cindex == 1
+        return (p.minmax[1], (p.xvalues[1]+p.xvalues[2])/2)
+    elseif box.parent_cindex == 2
+        return ((p.xvalues[1]+p.xvalues[2])/2, (p.xvalues[2]+p.xvalues[3])/2)
+    elseif box.parent_cindex == 3
+        return ((p.xvalues[2]+p.xvalues[3])/2, p.minmax[2])
+    end
+    error("invalid parent_cindex $(box.parent_cindex)")
+end
+
+"""
+    left, right = boxbounds(box, lower::Real, upper::Real)
+
+Compute the bounds of `box` along the `splitdim` of `box`'s parent.
+For the root box, returns `(lower, upper)`.
+"""
+function boxbounds(box::Box, lower::Real, upper::Real)
+    isroot(box) && return (lower, upper)
+    return boxbounds(box)
+end
+
+"""
+    bb = boxbounds(box, lower::AbstractVector, upper::AbstractVector)
+
+Compute the bounds of `box` along all dimensions.
+"""
+function boxbounds(box::Box{T}, lower::AbstractVector, upper::AbstractVector) where T
+    length(lower) == length(upper) == ndims(box) || throw(DimensionMismatch("lower and upper must match dimensions of box"))
+    bb = [(T(lower[i]), T(upper[i])) for i = 1:ndims(box)]
+    boxbounds!(bb, box)
+end
+
 function boxbounds!(bb, box::Box)
     flag = falses(ndims(box))
     boxbounds!(bb, flag, box)
@@ -234,10 +329,6 @@ function boxbounds!(bb, flag, box::Box)
     end
     bb
 end
-function boxbounds(box::Box{T}, lower::AbstractVector, upper::AbstractVector) where T
-    bb = [(T(lower[i]), T(upper[i])) for i = 1:2]
-    QuadDIRECT.boxbounds!(bb, box)
-end
 
 function width(box::Box, splitdim::Integer, xdefault::Real, lower::Real, upper::Real)
     p = find_parent_with_splitdim(box, splitdim)
@@ -247,6 +338,21 @@ function width(box::Box, splitdim::Integer, xdefault::Real, lower::Real, upper::
 end
 width(box::Box, splitdim::Integer, xdefault, lower, upper) =
     width(box, splitdim, xdefault[splitdim], lower[splitdim], upper[splitdim])
+
+"""
+    within(x, (left, right), dir)
+
+Return `true` if `x` lies between `left` and `right`. If `x` is on the edge,
+`dir` must point towards the interior (positive if `x==left`, negative if `x==right`).
+"""
+function within(x::Real, bb::Tuple{Real,Real}, dir)
+    if !(bb[1] <= x <= bb[2])
+        return false
+    end
+    ((x == bb[1]) & (dir < 0)) && return false
+    ((x == bb[2]) & (dir > 0)) && return false
+    return true
+end
 
 function Base.extrema(root::Box)
     isleaf(root) && error("tree is empty")

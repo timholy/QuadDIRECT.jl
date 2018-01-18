@@ -116,6 +116,40 @@ end
     end
 end
 
+@testset "Traversal" begin
+    splits = ([-2, 0, 2], [-1, 0, 1])
+    box, x0, xstar = QuadDIRECT.init(camel, splits, [-Inf, -Inf], [Inf, Inf])
+    # Finding neighbors
+    function nbrprep(child)
+        x = QuadDIRECT.position(child, x0)
+        i = child.parent.splitdim
+        bb = QuadDIRECT.boxbounds(child)
+        x, bb, i
+    end
+    root = QuadDIRECT.get_root(box)
+    for box in (root, filter(x->!QuadDIRECT.isleaf(x), root.children)[1])
+        x, bb, i = nbrprep(box.children[1])
+        x[i] = bb[2]
+        nbr = QuadDIRECT.find_leaf_at_edge(root, x, i, +1)
+        @test QuadDIRECT.isleaf(nbr)
+        @test QuadDIRECT.isparent(box.children[2], nbr)
+        x, bb, i = nbrprep(box.children[2])
+        x[i] = bb[1]
+        nbr = QuadDIRECT.find_leaf_at_edge(root, x, i, -1)
+        @test QuadDIRECT.isleaf(nbr)
+        @test QuadDIRECT.isparent(box.children[1], nbr)
+        x[i] = bb[2]
+        nbr = QuadDIRECT.find_leaf_at_edge(root, x, i, +1)
+        @test QuadDIRECT.isleaf(nbr)
+        @test QuadDIRECT.isparent(box.children[3], nbr)
+        x, bb, i = nbrprep(box.children[3])
+        x[i] = bb[1]
+        nbr = QuadDIRECT.find_leaf_at_edge(root, x, i, -1)
+        @test QuadDIRECT.isleaf(nbr)
+        @test QuadDIRECT.isparent(box.children[2], nbr)
+    end
+end
+
 @testset "Building minimum edges" begin
     splits = ([-2, 0, 2], [-1, 0, 1])
     lower, upper = [-2.75, -1.9], [3.0, 2.0]

@@ -68,7 +68,7 @@ function autosplit!(box::Box{T}, f, xtmp, splitdim, xsplitdefault, lower::Real, 
     isroot(p) && p.splitdim != splitdim && return split!(box, f, xtmp, splitdim, xsplitdefault, lower, upper)
     bb = boxbounds(p, lower, upper)
     xcur = p.parent.xvalues[p.parent_cindex]
-    fcur = box.parent.fvalues[p.parent_cindex]
+    fcur = box.parent.fvalues[box.parent_cindex]
     # Do a quadratic fit
     xp, fp = p.parent.xvalues, p.parent.fvalues
     Δx = 2*max(xp[2]-xp[1], xp[3]-xp[2]) # in case the bounds are infinite, grow the gap

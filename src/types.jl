@@ -30,7 +30,7 @@ MELink{Tw,Tf}(dummylabel::Tl) where {Tl,Tw,Tf} = MELink{Tl,Tw,Tf}(dummylabel, ty
 Base.iteratorsize(::Type{<:MELink}) = Base.SizeUnknown()
 
 # Mutable length-3 vector without the storage overhead of Array
-mutable struct MVector3{T} <: AbstractVector{3}
+mutable struct MVector3{T} <: AbstractVector{T}
     x1::T
     x2::T
     x3::T
@@ -59,6 +59,9 @@ function Base.convert(::Type{MVector3{T}}, a::AbstractVector) where T
 end
 Base.convert(::Type{MVector3}, a::AbstractVector{T}) where T =
     convert(MVector3{T}, a)
+
+Base.similar(::MVector3{T}, ::Type{S}, dims::Tuple{Vararg{Int}}) where {T,S} =
+    Array{S}(uninitialized, dims)
 
 boxtype(::Type{<:Integer}) = Float64
 boxtype(::Type{T}) where T = T
@@ -108,3 +111,4 @@ isroot(box::Box) = box.parent == box
 isleaf(box::Box) = box.splitdim == 0
 Base.parent(box::Box) = box.parent
 Base.ndims(box::Box{T,N}) where {T,N} = N
+
