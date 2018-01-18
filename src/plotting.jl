@@ -1,4 +1,4 @@
-using Plots, Colors, PerceptualColourMaps, Compat
+using PyPlot, Colors, PerceptualColourMaps, Compat
 using QuadDIRECT
 using QuadDIRECT: Box
 
@@ -29,32 +29,38 @@ function plotbounds(root::Box{T,2}, x0, lower, upper) where T
 end
 
 function plotboxes(root::Box{T,2}, x0, clim, cs::AbstractVector{<:Colorant}, lower, upper, xbounds::Tuple{Any,Any}, ybounds::Tuple{Any,Any}) where T
-    plt = plot(clims=clim, xlims=xbounds, ylims=ybounds)
+    clf()
     for bx in QuadDIRECT.visit_leaves(root)
-        plt = plotrect!(plt, bx, x0, clim, cs, lower, upper, xbounds, ybounds)
+        plotrect(bx, x0, clim, cs, lower, upper, xbounds, ybounds)
     end
-    plt
+    xlim(xbounds)
+    ylim(ybounds)
+    ax = gca()
+    # norm = PyPlot.matplotlib[:colors][:Normalize](vmin=clim[1], vmax=clim[2])
+    # cb = PyPlot.matplotlib[:colorbar][:ColorbarBase](ax, cmap=ColorMap(cs), norm=norm)
+    ax
 end
 function plotboxes(root::Box{T,2}, x0, lower, upper, xbounds::Tuple{Any,Any}, ybounds::Tuple{Any,Any}) where T
     clim = extrema(root)
-    cs = cmap("L4")
+    cs = cmap("RAINBOW3")
     plotboxes(root, x0, clim, cs, lower, upper, xbounds, ybounds)
 end
 plotboxes(root::Box{T,2}, x0, lower, upper) where T = plotboxes(root, x0, lower, upper, plotbounds(root, x0, lower, upper)...)
 
-function plotrect!(plt, box::Box{T,2}, x0, clim, cs, lower, upper, xbounds, ybounds) where T
+function plotrect(box::Box{T,2}, x0, clim, cs, lower, upper, xbounds, ybounds) where T
     @assert(QuadDIRECT.isleaf(box))
     x = QuadDIRECT.position(box, x0)
-    bb = [(lower[i], upper[i]) for i = 1:2]
-    QuadDIRECT.boxbounds!(bb, box)
+    bb = QuadDIRECT.boxbounds(box, lower, upper)
     bbx, bby = bb
     rectx = [bbx[1], bbx[2], bbx[2], bbx[1], bbx[1]]
     recty = [bby[1], bby[1], bby[2], bby[2], bby[1]]
     fval = box.parent.fvalues[box.parent_cindex]
     cnorm = (clamp(fval, clim...) - clim[1])/(clim[2] - clim[1])
     col = cs[round(Int, (length(cs)-1)*cnorm) + 1]
-    plot!(plt, clamp.(rectx, xbounds...), clamp.(recty, ybounds...), fill=(0,0.5,col), linecolor=:black, linealpha=0)
-    plot!(plt, rectx, recty, linecolor=:black)
-    scatter!(plt, [x[1]], [x[2]], markershape=:circle, markercolor=:black)
-    plt
+    hold(true)
+    fill(clamp.(rectx, xbounds...), clamp.(recty, ybounds...), color=[red(col), green(col), blue(col)])
+    plot(rectx, recty, "k")
+    plot([x[1]], [x[2]], "k.")
+    hold(false)
+    nothing
 end
