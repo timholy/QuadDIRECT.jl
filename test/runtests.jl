@@ -81,6 +81,11 @@ function camel(x)
     return (4 - 2.1*x1s + x1s*x1s/3)*x1s + x1*x2 + (-4 + 4*x2s)*x2s
 end
 
+function canyon(x)
+    x1, x2 = x[1], x[2]
+    return 0.1*(x1+x2)^2 + 10*(x1-x2)^2
+end
+
 @testset "Initialization" begin
     splits = ([-2, 0, 2], [-1, 0, 1])
     box, x0, xstar = QuadDIRECT.init(camel, splits, [-Inf, -Inf], [Inf, Inf])
