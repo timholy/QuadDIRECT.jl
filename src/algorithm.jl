@@ -127,10 +127,10 @@ function sweep!(root::Box, f, x0, splits, lower, upper)
     flag = similar(x0, Bool)
     for (i, me) in enumerate(mes)
         for item in me
-            box = me.l
+            box = item.l
             position!(xtmp, flag, box)
             default_position!(xtmp, flag, x0)
-            autosplit!(me.l, f, xtmp, i, splits[i], lower[i], upper[i])
+            autosplit!(box, f, xtmp, i, splits[i], lower[i], upper[i])
         end
     end
     root

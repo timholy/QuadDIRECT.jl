@@ -91,18 +91,21 @@ function Base.show(io::IO, box::Box)
     print(io, "Box@", x)
 end
 
-function treeprint(io::IO, root::Box)
+function treeprint(io::IO, f::Function, root::Box)
     show(io, root)
+    y = f(root)
+    y != nothing && print(io, y)
     if !isleaf(root)
         print(io, '(')
-        treeprint(io, root.children[1])
+        treeprint(io, f, root.children[1])
         print(io, ", ")
-        treeprint(io, root.children[2])
+        treeprint(io, f, root.children[2])
         print(io, ", ")
-        treeprint(io, root.children[3])
+        treeprint(io, f, root.children[3])
         print(io, ')')
     end
 end
+treeprint(io::IO, root::Box) = treeprint(io, x->nothing, root)
 
 function add_children!(parent::Box, splitdim, xvalues, fvalues, u::Real, v::Real)
     isleaf(parent) || error("cannot add children to non-leaf node")
@@ -170,6 +173,12 @@ function boxbounds(box::Box, lower::Real, upper::Real)
 end
 
 position(box::Box) = position!(fill(NaN, ndims(box)), box)
+function position(box::Box, x0::AbstractVector)
+    x = fill(NaN, ndims(box))
+    flag = falses(length(x0))
+    position!(x, flag, box)
+    default_position!(x, flag, x0)
+end
 function position!(x, box::Box)
     flag = falses(length(x))
     position!(x, flag, box)
@@ -201,22 +210,33 @@ end
 
 function boxbounds!(bb, box::Box)
     flag = falses(ndims(box))
-    position!(bb, flag, box)
+    boxbounds!(bb, flag, box)
     return bb
 end
 function boxbounds!(bb, flag, box::Box)
     fill!(flag, false)
-    nfilled = 0
+    if isleaf(box)
+        bb[box.parent.splitdim] = boxbounds(box)
+        flag[box.parent.splitdim] = true
+    else
+        bb[box.splitdim] = box.minmax
+        flag[box.splitdim] = true
+    end
+    nfilled = 1
     while !isroot(box) && nfilled < ndims(box)
         i = box.parent.splitdim
         if !flag[i]
-            bb[i] = box.parent.minmax
+            bb[i] = boxbounds(box)
             flag[i] = true
             nfilled += 1
         end
         box = box.parent
     end
     bb
+end
+function boxbounds(box::Box{T}, lower::AbstractVector, upper::AbstractVector) where T
+    bb = [(T(lower[i]), T(upper[i])) for i = 1:2]
+    QuadDIRECT.boxbounds!(bb, box)
 end
 
 function width(box::Box, splitdim::Integer, xdefault::Real, lower::Real, upper::Real)
