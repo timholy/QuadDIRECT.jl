@@ -363,6 +363,25 @@ function within(x::Real, bb::Tuple{Real,Real}, dir)
     return true
 end
 
+function count_splits(box::Box)
+    nsplits = Vector{Int}(uninitialized, ndims(box))
+    count_splits!(nsplits, box)
+end
+
+function count_splits!(nsplits, box::Box)
+    fill!(nsplits, 0)
+    if box.splitdim == 0
+        box = box.parent
+        box.splitdim == 0 && return nsplits  # an unsplit tree
+    end
+    nsplits[box.splitdim] += 1
+    while !isroot(box)
+        box = box.parent
+        nsplits[box.splitdim] += 1
+    end
+    return nsplits
+end
+
 function Base.extrema(root::Box)
     isleaf(root) && error("tree is empty")
     minv, maxv = extrema(root.fvalues)
@@ -462,6 +481,19 @@ function lohi(x, y, z)
     return x, y, z
 end
 
+function order_pairs(xf1, xf2)
+    x1, f1 = xf1
+    x2, f2 = xf2
+    return x1 <= x2 ? (xf1, xf2) : (xf2, xf1)
+end
+
+function order_pairs(xf1, xf2, xf3)
+    xf1, xf2 = order_pairs(xf1, xf2)
+    xf2, xf3 = order_pairs(xf2, xf3)
+    xf1, xf2 = order_pairs(xf1, xf2)
+    return xf1, xf2, xf3
+end
+
 function biggest_interval(a, b, c, d)
     ab, bc, cd = b-a, c-b, d-c
     if ab <= bc && ab <= cd
@@ -470,4 +502,17 @@ function biggest_interval(a, b, c, d)
         return (b, c)
     end
     return (c, d)
+end
+
+function ensure_distinct(x::T, x1, x2, bb::Tuple{Real,Real}; minfrac = 0.1) where T
+    x1, x2 = lohi(x1, x2)
+    Δxmin = minfrac*(x2-x1)
+    if abs(x - x1) < Δxmin
+        s = x == x1 ? 1 : sign(x-x1)
+        x = T(max(bb[1], x1 + Δxmin*s))
+    elseif abs(x - x2) < Δxmin
+        s = x == x2 ? -1 : sign(x-x2)
+        x = T(min(bb[2], x2 + Δxmin*s))
+    end
+    return x
 end
