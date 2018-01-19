@@ -72,6 +72,12 @@ Base.start(mel::MELink) = mel
 Base.done(mel::MELink, state::MELink) = state == state.next
 Base.next(mel::MELink, state::MELink) = (state.next, state.next)
 
+function popfirst!(mel::MELink)
+    item = mel.next
+    mel.next = item.next == item ? mel : item.next
+    return item
+end
+
 function Base.show(io::IO, mel::MELink)
     print(io, "List(")
     next = mel.next
