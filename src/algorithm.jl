@@ -39,7 +39,7 @@ function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real
     fsplit = MVector3{T}(typemax(T), typemax(T), typemax(T))
     fmin, idxmin = typemax(T), 0
     for l = 1:3
-        if xsplit[l] == xcur
+        if xsplit[l] == xcur && !isnan(fcur)
             ftmp = fcur
         else
             xtmp = replacecoordinate!(xtmp, splitdim, xsplit[l])
@@ -67,11 +67,11 @@ function autosplit!(box::Box{T}, f, xtmp, splitdim, xsplitdefault, lower::Real, 
     p = find_parent_with_splitdim(box, splitdim)
     isroot(p) && p.splitdim != splitdim && return split!(box, f, xtmp, splitdim, xsplitdefault, lower, upper)
     bb = boxbounds(p, lower, upper)
-    xcur = p.parent.xvalues[p.parent_cindex]
-    fcur = box.parent.fvalues[box.parent_cindex]
-    # Do a quadratic fit
     xp, fp = p.parent.xvalues, p.parent.fvalues
     Δx = 2*max(xp[2]-xp[1], xp[3]-xp[2]) # in case the bounds are infinite, grow the gap
+    xcur = xp[p.parent_cindex]
+    fcur = box.parent.fvalues[box.parent_cindex]
+    # Do a quadratic fit
     xvert, fval, qcoef = qfit(xp[1]=>fp[1], xp[2]=>fp[2], xp[3]=>fp[3])
     if qcoef > 0 && xvert != xcur
         # xvert is a minimum

@@ -375,6 +375,7 @@ function get_root(box::Box)
 end
 
 abstract type DepthFirstIterator end
+Base.iteratorsize(::Type{<:DepthFirstIterator}) = Base.SizeUnknown()
 
 struct DepthFirstLeafIterator{T} <: DepthFirstIterator
     root::Box{T}

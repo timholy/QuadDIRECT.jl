@@ -111,4 +111,4 @@ isroot(box::Box) = box.parent == box
 isleaf(box::Box) = box.splitdim == 0
 Base.parent(box::Box) = box.parent
 Base.ndims(box::Box{T,N}) where {T,N} = N
-
+Base.iteratorsize(::Type{<:Box}) = Base.SizeUnknown()
