@@ -112,7 +112,7 @@ end
 # A dumb O(N) algorithm for building the minimum-edge structures
 function minimum_edges(root::Box{T,N}, x0, lower, upper) where {T,N}
     mes = [MELink{T,T}(root) for i = 1:N]
-    for box in visit_leaves(root)
+    for box in leaves(root)
         fval = box.parent.fvalues[box.parent_cindex]
         for i = 1:N
             insert!(mes[i], width(box, i, x0, lower, upper), box=>fval)

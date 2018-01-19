@@ -13,7 +13,7 @@ function plotbounds(root::Box{T,2}, x0, lower, upper) where T
     bb = Vector{Tuple{T,T}}(uninitialized, 2)
     x = [NaN, NaN]
     flag = [false, false]
-    for box in QuadDIRECT.visit_leaves(root)
+    for box in leaves(root)
         for i = 1:2
             bb[i] = (lower[i], upper[i])
         end
@@ -30,7 +30,7 @@ end
 
 function plotboxes(root::Box{T,2}, x0, clim, cs::AbstractVector{<:Colorant}, lower, upper, xbounds::Tuple{Any,Any}, ybounds::Tuple{Any,Any}) where T
     clf()
-    for bx in QuadDIRECT.visit_leaves(root)
+    for bx in leaves(root)
         plotrect(bx, x0, clim, cs, lower, upper, xbounds, ybounds)
     end
     xlim(xbounds)

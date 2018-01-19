@@ -395,7 +395,7 @@ struct VisitorBool{T}
     done::Bool
 end
 
-function visit_leaves(root::Box)
+function leaves(root::Box)
     DepthFirstLeafIterator(root)
 end
 

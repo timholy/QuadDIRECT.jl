@@ -3,7 +3,7 @@ module QuadDIRECT
 using StaticArrays
 using Compat
 
-export treeprint
+export leaves, treeprint
 
 include("types.jl")
 include("util.jl")
