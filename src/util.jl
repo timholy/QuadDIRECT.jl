@@ -88,8 +88,17 @@ end
 function Base.show(io::IO, box::Box)
     x = fill(NaN, ndims(box))
     position!(x, box)
-    print(io, "Box@", x)
+    val = isroot(box) ? "Root" : value(box)
+    print(io, "Box$val@", x)
 end
+
+function value(box::Box)
+    isroot(box) && error("root box does not have a unique value")
+    box.parent.fvalues[box.parent_cindex]
+end
+value_safe(box::Box{T}) where T = isroot(box) ? typemax(T) : value(box)
+
+Base.isless(box1::Box, box2::Box) = isless(value_safe(box1), value_safe(box2))
 
 function treeprint(io::IO, f::Function, root::Box)
     show(io, root)
