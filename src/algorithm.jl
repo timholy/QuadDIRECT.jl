@@ -62,7 +62,7 @@ function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real
     return box.children[idxmin]
 end
 
-function autosplit!(box::Box{T}, f, x0, xtmp, splitdim, xsplitdefaults, lower, upper, visited::Set) where T
+function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, xsplitdefaults, lower, upper, visited::Set) where T
     if !isleaf(box)
         # This box already got split along a different dimension
         box = find_smallest_child_leaf(box)
@@ -90,7 +90,9 @@ function autosplit!(box::Box{T}, f, x0, xtmp, splitdim, xsplitdefaults, lower, u
     p = find_parent_with_splitdim(box, splitdim)
     if isroot(p) && p.splitdim != splitdim
         xcur, fcur = x0[splitdim], box.parent.fvalues[box.parent_cindex]
-        return split!(box, f, xtmp, splitdim, xsplitdefault, lwr, upr, xcur, fcur)
+        split!(box, f, xtmp, splitdim, xsplitdefault, lwr, upr, xcur, fcur)
+        trimschedule!(mes, box, splitdim, x0, lower, upper)
+        return box
     end
     bb = boxbounds(p)
     xp, fp = p.parent.xvalues, p.parent.fvalues
@@ -133,8 +135,10 @@ function autosplit!(box::Box{T}, f, x0, xtmp, splitdim, xsplitdefaults, lower, u
             xtmp = replacecoordinate!(xtmp, splitdim, xvert)
             fvert = f(xtmp)
             xf1, xf2, xf3 = order_pairs(xcur=>fcur, xnew=>fnew, xvert=>fvert)
-            return add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
-                                 MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
+            add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
+                          MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
+            trimschedule!(mes, box, splitdim, x0, lower, upper)
+            return box
         end
         # xvert is not in the box. Prepare to split the neighbor, but for this box
         # just bisect xcur and xnew
@@ -151,9 +155,10 @@ function autosplit!(box::Box{T}, f, x0, xtmp, splitdim, xsplitdefaults, lower, u
         if isempty(visited) || nbr ∈ visited  # split if this is the first or last in the chain
             add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
                         MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
+            trimschedule!(mes, box, splitdim, x0, lower, upper)
         end
         nbr ∈ visited && return box # don't get into a cycle
-        return autosplit!(nbr, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, push!(visited, box))
+        return autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, push!(visited, box))
     end
     # Trisect
     l, r = bb
@@ -171,7 +176,9 @@ function autosplit!(box::Box{T}, f, x0, xtmp, splitdim, xsplitdefaults, lower, u
     else
         c = xcur
     end
-    return split!(box, f, xtmp, splitdim, MVector3{T}(a, b, c), bb..., xcur, fcur)
+    split!(box, f, xtmp, splitdim, MVector3{T}(a, b, c), bb..., xcur, fcur)
+    trimschedule!(mes, box, splitdim, x0, lower, upper)
+    return box
 end
 
 # A dumb O(N) algorithm for building the minimum-edge structures
@@ -181,6 +188,16 @@ function minimum_edges(root::Box{T,N}, x0, lower, upper) where {T,N}
         fval = box.parent.fvalues[box.parent_cindex]
         for i = 1:N
             insert!(mes[i], width(box, i, x0, lower, upper), box=>fval)
+        end
+    end
+    return mes
+end
+
+function trimschedule!(mes::Vector{<:MELink}, box::Box, splitdim, x0, lower, upper)
+    for child in box.children
+        fval = child.parent.fvalues[child.parent_cindex]
+        for i = 1:ndims(box)
+            trim!(mes[i], width(child, i, x0, lower, upper), child=>fval)
         end
     end
     return mes
@@ -198,7 +215,8 @@ function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper)
     nprocessed = 0
     visited = Set{typeof(root)}()
     for (i, me) in enumerate(mes)
-        for item in me
+        while !isempty(me)
+            item = popfirst!(me)
             box = item.l
             position!(xtmp, flag, box)
             default_position!(xtmp, flag, x0)
@@ -209,7 +227,7 @@ function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper)
             end
             nprocessed += 1
             empty!(visited)
-            autosplit!(box, f, x0, xtmp, i, splits, lower, upper, visited)
+            autosplit!(box, mes, f, x0, xtmp, i, splits, lower, upper, visited)
         end
     end
     println(nprocessed, " processed, starting with ", nleaves0, " leaves and ending with ", count(x->true, leaves(root)))

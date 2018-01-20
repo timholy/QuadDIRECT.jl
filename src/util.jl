@@ -45,7 +45,13 @@ function dropnext!(prev, next)
     return next
 end
 
-function Base.insert!(mel::MELink, w, lf::Pair)
+"""
+    prev, next = trim!(mel::MELink, w, label=>fvalue)
+
+Remove entries from `mel` that are worse than `(w, label=>fvalue)`.
+Returns linked-list positions on either side of the putative new value.
+"""
+function trim!(mel::MELink, w, lf::Pair)
     l, f = lf
     prev, next = mel, mel.next
     while prev != next && w > next.w
@@ -56,10 +62,16 @@ function Base.insert!(mel::MELink, w, lf::Pair)
             next = next.next
         end
     end
-    if w == next.w
-        f >= next.f && return mel
+    if w == next.w && f < next.f
         next = dropnext!(prev, next)
     end
+    return prev, next
+end
+
+function Base.insert!(mel::MELink, w, lf::Pair)
+    l, f = lf
+    prev, next = trim!(mel, w, lf)
+    # Perform the insertion
     if prev == next
         # we're at the end of the list
         prev.next = typeof(mel)(l, w, f)
