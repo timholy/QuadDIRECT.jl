@@ -73,3 +73,5 @@ These match the known global optima to reasonably high precision.
 
 There's also a convenience function `minimize` which just returns the location and value of the
 minimum.
+
+For more examples, see the `demo` directory.

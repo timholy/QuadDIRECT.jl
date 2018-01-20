@@ -130,21 +130,21 @@ end
     for box in (root, filter(x->!QuadDIRECT.isleaf(x), root.children)[1])
         x, bb, i = nbrprep(box.children[1])
         x[i] = bb[2]
-        nbr = QuadDIRECT.find_leaf_at_edge(root, x, i, +1)
+        nbr, success = QuadDIRECT.find_leaf_at_edge(root, x, i, +1)
         @test QuadDIRECT.isleaf(nbr)
         @test QuadDIRECT.isparent(box.children[2], nbr)
         x, bb, i = nbrprep(box.children[2])
         x[i] = bb[1]
-        nbr = QuadDIRECT.find_leaf_at_edge(root, x, i, -1)
+        nbr, success = QuadDIRECT.find_leaf_at_edge(root, x, i, -1)
         @test QuadDIRECT.isleaf(nbr)
         @test QuadDIRECT.isparent(box.children[1], nbr)
         x[i] = bb[2]
-        nbr = QuadDIRECT.find_leaf_at_edge(root, x, i, +1)
+        nbr, success = QuadDIRECT.find_leaf_at_edge(root, x, i, +1)
         @test QuadDIRECT.isleaf(nbr)
         @test QuadDIRECT.isparent(box.children[3], nbr)
         x, bb, i = nbrprep(box.children[3])
         x[i] = bb[1]
-        nbr = QuadDIRECT.find_leaf_at_edge(root, x, i, -1)
+        nbr, success = QuadDIRECT.find_leaf_at_edge(root, x, i, -1)
         @test QuadDIRECT.isleaf(nbr)
         @test QuadDIRECT.isparent(box.children[2], nbr)
     end

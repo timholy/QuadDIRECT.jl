@@ -230,11 +230,13 @@ function find_leaf_at(root::Box, x)
 end
 
 """
-    box = find_leaf_at_edge(root, x, splitdim, dir)
+    box, success = find_leaf_at_edge(root, x, splitdim, dir)
 
-Return the leaf-node `box` that contains `x` with an edge at `x[splitdim]`.
+Return the node `box` that contains `x` with an edge at `x[splitdim]`.
 If `dir > 0`, a box to the right of the edge will be returned; if `dir < 0`, a box to the
-left will be returned.
+left will be returned. `box` will be a leaf-node unless `success` is false;
+the usual explanation for this is that the chosen edge is at the edge of the allowed
+domain, and hence there isn't a node in that direction.
 
 This is a useful utility for finding the neighbor of a given box. Example:
 
@@ -262,9 +264,9 @@ function find_leaf_at_edge(root::Box, x, splitdim::Integer, dir::Signed)
                 break
             end
         end
-        found || error("$(x[i]) not within $(root.minmax)")
+        found || return (root, false)
     end
-    root
+    return (root, true)
 end
 
 """
@@ -527,6 +529,16 @@ function up(box, root)
         i <= length(box.children) && break
     end
     return (box, i)
+end
+
+function Base.length(iter::DepthFirstLeafIterator)
+    state = start(iter)
+    len = 0
+    while !done(iter, state)
+        _, state = next(iter, state)
+        len += 1
+    end
+    len
 end
 
 ## Utilities for working with both mutable and immutable vectors

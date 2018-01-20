@@ -62,7 +62,8 @@ function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real
     return box.children[idxmin]
 end
 
-function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, xsplitdefaults, lower, upper, visited::Set) where T
+function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, xsplitdefaults, lower, upper, minwidth, visited::Set) where T
+    box ∈ visited && error("already visited box")
     if !isleaf(box)
         # This box already got split along a different dimension
         box = find_smallest_child_leaf(box)
@@ -95,6 +96,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
         return box
     end
     bb = boxbounds(p)
+    bb[2]-bb[1] >= minwidth[splitdim] || return box
     xp, fp = p.parent.xvalues, p.parent.fvalues
     Δx = max(xp[2]-xp[1], xp[3]-xp[2])  # a measure of the "pragmatic" box scale even when the box is infinite
     xcur = xp[p.parent_cindex]
@@ -147,7 +149,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
         else
             xtmp, dir = replacecoordinate!(xtmp, splitdim, bb[2]), +1
         end
-        nbr = find_leaf_at_edge(get_root(box), xtmp, splitdim, dir)
+        nbr, success = find_leaf_at_edge(get_root(box), xtmp, splitdim, dir)
         xmid = (xcur+xnew)/2
         xtmp = replacecoordinate!(xtmp, splitdim, xmid)
         fmid = f(xtmp)
@@ -157,8 +159,8 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
                         MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
             trimschedule!(mes, box, splitdim, x0, lower, upper)
         end
-        nbr ∈ visited && return box # don't get into a cycle
-        return autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, push!(visited, box))
+        (!success || nbr ∈ visited) && return box # don't get into a cycle
+        return autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, minwidth, push!(visited, box))
     end
     # Trisect
     l, r = bb
@@ -182,11 +184,13 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
 end
 
 # A dumb O(N) algorithm for building the minimum-edge structures
-function minimum_edges(root::Box{T,N}, x0, lower, upper) where {T,N}
+function minimum_edges(root::Box{T,N}, x0, lower, upper; minwidth=zeros(eltype(x0), ndims(root))) where {T,N}
     mes = [MELink{T,T}(root) for i = 1:N]
     for box in leaves(root)
         fval = box.parent.fvalues[box.parent_cindex]
         for i = 1:N
+            bb = boxbounds(find_parent_with_splitdim(box, i), lower[i], upper[i])
+            bb[2]-bb[1] < minwidth[i] && continue
             insert!(mes[i], width(box, i, x0, lower, upper), box=>fval)
         end
     end
@@ -203,21 +207,25 @@ function trimschedule!(mes::Vector{<:MELink}, box::Box, splitdim, x0, lower, upp
     return mes
 end
 
-function sweep!(root::Box, f, x0, splits, lower, upper)
-    mes = minimum_edges(root, x0, lower, upper)
-    sweep!(root, mes, f, x0, splits, lower, upper)
+function sweep!(root::Box, f, x0, splits, lower, upper; minwidth=zeros(eltype(x0), ndims(root)))
+    mes = minimum_edges(root, x0, lower, upper; minwidth=minwidth)
+    sweep!(root, mes, f, x0, splits, lower, upper; minwidth=minwidth)
 end
-function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper)
+function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper; minwidth=zeros(eltype(x0), ndims(root)))
     xtmp = similar(x0)
     flag = similar(x0, Bool)
     nsplits = similar(x0, Int)
     nleaves0 = count(x->true, leaves(root))
     nprocessed = 0
     visited = Set{typeof(root)}()
-    for (i, me) in enumerate(mes)
+    dimorder = randperm(ndims(root)) # makes the results stochastic. Introduce a deterministic permutation?
+    for i in dimorder
+        me = mes[i]
         while !isempty(me)
             item = popfirst!(me)
             box = item.l
+            bb = boxbounds(find_parent_with_splitdim(box, i), lower[i], upper[i])
+            bb[2]-bb[1] < minwidth[i] && continue
             position!(xtmp, flag, box)
             default_position!(xtmp, flag, x0)
             count_splits!(nsplits, box)
@@ -227,7 +235,7 @@ function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper)
             end
             nprocessed += 1
             empty!(visited)
-            autosplit!(box, mes, f, x0, xtmp, i, splits, lower, upper, visited)
+            autosplit!(box, mes, f, x0, xtmp, i, splits, lower, upper, minwidth, visited)
         end
     end
     # println(nprocessed, " processed, starting with ", nleaves0, " leaves and ending with ", count(x->true, leaves(root)))
@@ -241,6 +249,10 @@ Analyze the behavior of `f`, searching for minima, over the rectangular box spec
 `lower` and `upper` (`lower[i] <= x[i] <= upper[i]`). The bounds may be infinite.
 `splits` is a list of 3-vectors containing the initial values along each coordinate
 axis at which to potentially evaluate `f`; the values must be in increasing order.
+
+`root` is a tree structure that stores information about the behavior of `f`.
+`x0` contains the initial evaluation point, the position constructed from the middle value
+of `splits` in each dimension.
 
 `rtol` and `atol` represent relative and
 absolute, respectively, changes in minimum function value required for the exploration
@@ -286,22 +298,40 @@ the analysis is terminated if the function value is ever reduced below `fvalue`.
 
 See also [`minimize`](@ref).
 """
-function analyze(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+function analyze(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...)
     box, x0 = init(f, splits, lower, upper)
     root = get_root(box)
-    analyze(root, f, x0, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals)
+    analyze!(root, f, x0, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals, kwargs...)
+    return root, x0
 end
 
-function analyze(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+"""
+    root = analyze!(root, f, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+
+Further refinement of `root`. See [`analyze`](@ref) for details.
+"""
+function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...)
     box = minimum(root)
     boxval = value(box)
     lastval = typemax(boxval)
     tol_counter = 0
-    while boxval > fvalue && tol_counter <= ndims(box) && count(x->true, leaves(root)) < maxevals
+    lastprint = 0
+    len = lenold = length(leaves(root))
+    if print_interval < typemax(Int)
+        println("Initial minimum ($len evaluations): ", minimum(root))
+    end
+    while boxval > fvalue && tol_counter <= ndims(box) && len < maxevals
         lastval = boxval
-        sweep!(root, f, x0, splits, lower, upper)
+        sweep!(root, f, x0, splits, lower, upper; kwargs...)
         box = minimum(root)
         boxval = value(box)
+        len = length(leaves(root))
+        len == lenold && break  # couldn't split any boxes
+        lenold = len
+        if len-lastprint > print_interval
+            println("minimum ($len evaluations): ", box)
+            lastprint = len
+        end
         @assert(boxval <= lastval)
         if lastval - boxval < atol || lastval - boxval < rtol*(abs(lastval) + abs(boxval))
             tol_counter += 1
@@ -309,7 +339,10 @@ function analyze(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, at
             tol_counter = 0
         end
     end
-    root, x0
+    if print_interval < typemax(Int)
+        println("Final minimum ($len evaluations): ", minimum(root))
+    end
+    root
 end
 
 """
