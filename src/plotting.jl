@@ -28,7 +28,7 @@ function plotbounds(root::Box{T,2}, x0, lower, upper) where T
     widenbounds(xbounds), widenbounds(ybounds)
 end
 
-function plotboxes(root::Box{T,2}, x0, clim, cs::AbstractVector{<:Colorant}, lower, upper, xbounds::Tuple{Any,Any}, ybounds::Tuple{Any,Any}) where T
+function plotboxes(root::Box{T,2}, x0, lower, upper, xbounds::Tuple{Any,Any}, ybounds::Tuple{Any,Any}; clim=extrema(root), cs::AbstractVector{<:Colorant}=cmap("RAINBOW3")) where T
     clf()
     for bx in leaves(root)
         plotrect(bx, x0, clim, cs, lower, upper, xbounds, ybounds)
@@ -40,12 +40,8 @@ function plotboxes(root::Box{T,2}, x0, clim, cs::AbstractVector{<:Colorant}, low
     # cb = PyPlot.matplotlib[:colorbar][:ColorbarBase](ax, cmap=ColorMap(cs), norm=norm)
     ax
 end
-function plotboxes(root::Box{T,2}, x0, lower, upper, xbounds::Tuple{Any,Any}, ybounds::Tuple{Any,Any}) where T
-    clim = extrema(root)
-    cs = cmap("RAINBOW3")
-    plotboxes(root, x0, clim, cs, lower, upper, xbounds, ybounds)
-end
-plotboxes(root::Box{T,2}, x0, lower, upper) where T = plotboxes(root, x0, lower, upper, plotbounds(root, x0, lower, upper)...)
+plotboxes(root::Box{T,2}, x0, lower, upper; clim=extrema(root), cs::AbstractVector{<:Colorant}=cmap("RAINBOW3")) where T =
+    plotboxes(root, x0, lower, upper, plotbounds(root, x0, lower, upper)...; clim=clim, cs=cs)
 
 function plotrect(box::Box{T,2}, x0, clim, cs, lower, upper, xbounds, ybounds) where T
     @assert(QuadDIRECT.isleaf(box))
