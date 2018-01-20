@@ -247,43 +247,42 @@ absolute, respectively, changes in minimum function value required for the explo
 to terminate. (These limits must be hit on `ndims` successive sweeps.) Alternatively,
 the analysis is terminated if the function value is ever reduced below `fvalue`.
 
-Example:
+# Example:
 
-# A function that has a long but skinny valley aligned at 45 degrees (minimum at [0,0])
-function canyon(x)
-    x1, x2 = x[1], x[2]
-    return 0.1*(x1+x2)^2 + 10*(x1-x2)^2
-end
+    # A function that has a long but skinny valley aligned at 45 degrees (minimum at [0,0])
+    function canyon(x)
+        x1, x2 = x[1], x[2]
+        return 0.1*(x1+x2)^2 + 10*(x1-x2)^2
+    end
 
-lower, upper = [-Inf, -Inf], [Inf, Inf]  # unbounded domain
+    lower, upper = [-Inf, -Inf], [Inf, Inf]  # unbounded domain
 
-# We'll initially consider a grid that covers -11->-9 along the first dimension
-# and -7->-5 along the second. This isn't a great initial guess, but that's OK.
-splits = ([-11,-10,-9], [-7,-6,-5])
+    # We'll initially consider a grid that covers -11->-9 along the first dimension
+    # and -7->-5 along the second. This isn't a great initial guess, but that's OK.
+    splits = ([-11,-10,-9], [-7,-6,-5])
 
-# Since this problem has a minimum value of 0, relying on `rtol` is not ideal
-# (it takes quite a few iterations), so specify an absolute tolerance.
-julia> root, x0 = analyze(canyon, splits, lower, upper; atol=0.01)  # low-precision solution
-(BoxRoot@[NaN, NaN], [-10.0, -6.0])
+    # Since this problem has a minimum value of 0, relying on `rtol` is not ideal
+    # (it takes quite a few iterations), so specify an absolute tolerance.
+    julia> root, x0 = analyze(canyon, splits, lower, upper; atol=0.01)  # low-precision solution
+    (BoxRoot@[NaN, NaN], [-10.0, -6.0])
 
-julia> box = minimum(root)
-Box0.015220406463743074@[0.192158, 0.19604]
+    julia> box = minimum(root)
+    Box0.015220406463743074@[0.192158, 0.19604]
 
-julia> value(box)
-0.015220406463743074
+    julia> value(box)
+    0.015220406463743074
 
-julia> position(box, x0)
-2-element Array{Float64,1}:
- 0.192158
- 0.19604
+    julia> position(box, x0)
+    2-element Array{Float64,1}:
+    0.192158
+    0.19604
 
-# Now a higher-precision solution
-julia> root, x0 = analyze(canyon, splits, lower, upper; atol=1e-5)
+    # Now a higher-precision solution
+    julia> root, x0 = analyze(canyon, splits, lower, upper; atol=1e-5)
+    (BoxRoot@[NaN, NaN], [-10.0, -6.0])
 
-(BoxRoot@[NaN, NaN], [-10.0, -6.0])
-
-julia> box = minimum(root)
-Box2.7058500379897107e-6@[-0.0025621, -0.00261386]
+    julia> box = minimum(root)
+    Box2.7058500379897107e-6@[-0.0025621, -0.00261386]
 
 See also [`minimize`](@ref).
 """
