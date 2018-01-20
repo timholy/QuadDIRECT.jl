@@ -188,3 +188,17 @@ end
     mn2, mx2 = extrema(r2)
     @test mn1 < mn2
 end
+
+@testset "Minimize" begin
+    splits = ([-2, 0, 2], [-1, 0, 1])
+    lower, upper = [-3,-2], [3,2]
+    xmin, fmin = minimize(camel, splits, lower, upper)
+    @test fmin < -1.02
+    @test norm(xmin - [0.0898, -0.7126]) < 0.1 || norm(xmin - [-0.0898, 0.7126]) < 0.1
+
+    splits = ([-11,-10,-9], [-7,-6,-5])
+    lower, upper = [-Inf, -Inf], [Inf, Inf]
+    xmin, fmin = minimize(canyon, splits, lower, upper; atol=1e-5)
+    @test fmin < 1e-5
+    @test norm(xmin) < 4e-3
+end

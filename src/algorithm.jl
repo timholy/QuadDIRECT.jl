@@ -222,7 +222,7 @@ function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper)
             default_position!(xtmp, flag, x0)
             count_splits!(nsplits, box)
             if nsplits[i] > 0 && any(iszero, nsplits)
-                println("discarding ", box, " along dimension ", i)
+                # println("discarding ", box, " along dimension ", i)
                 continue
             end
             nprocessed += 1
@@ -230,6 +230,97 @@ function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper)
             autosplit!(box, mes, f, x0, xtmp, i, splits, lower, upper, visited)
         end
     end
-    println(nprocessed, " processed, starting with ", nleaves0, " leaves and ending with ", count(x->true, leaves(root)))
+    # println(nprocessed, " processed, starting with ", nleaves0, " leaves and ending with ", count(x->true, leaves(root)))
     root
+end
+
+"""
+    root, x0 = analyze(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+
+Analyze the behavior of `f`, searching for minima, over the rectangular box specified by
+`lower` and `upper` (`lower[i] <= x[i] <= upper[i]`). The bounds may be infinite.
+`splits` is a list of 3-vectors containing the initial values along each coordinate
+axis at which to potentially evaluate `f`; the values must be in increasing order.
+
+`rtol` and `atol` represent relative and
+absolute, respectively, changes in minimum function value required for the exploration
+to terminate. (These limits must be hit on `ndims` successive sweeps.) Alternatively,
+the analysis is terminated if the function value is ever reduced below `fvalue`.
+
+Example:
+
+# A function that has a long but skinny valley aligned at 45 degrees (minimum at [0,0])
+function canyon(x)
+    x1, x2 = x[1], x[2]
+    return 0.1*(x1+x2)^2 + 10*(x1-x2)^2
+end
+
+lower, upper = [-Inf, -Inf], [Inf, Inf]  # unbounded domain
+
+# We'll initially consider a grid that covers -11->-9 along the first dimension
+# and -7->-5 along the second. This isn't a great initial guess, but that's OK.
+splits = ([-11,-10,-9], [-7,-6,-5])
+
+# Since this problem has a minimum value of 0, relying on `rtol` is not ideal
+# (it takes quite a few iterations), so specify an absolute tolerance.
+julia> root, x0 = analyze(canyon, splits, lower, upper; atol=0.01)  # low-precision solution
+(BoxRoot@[NaN, NaN], [-10.0, -6.0])
+
+julia> box = minimum(root)
+Box0.015220406463743074@[0.192158, 0.19604]
+
+julia> value(box)
+0.015220406463743074
+
+julia> position(box, x0)
+2-element Array{Float64,1}:
+ 0.192158
+ 0.19604
+
+# Now a higher-precision solution
+julia> root, x0 = analyze(canyon, splits, lower, upper; atol=1e-5)
+
+(BoxRoot@[NaN, NaN], [-10.0, -6.0])
+
+julia> box = minimum(root)
+Box2.7058500379897107e-6@[-0.0025621, -0.00261386]
+
+See also [`minimize`](@ref).
+"""
+function analyze(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+    box, x0 = init(f, splits, lower, upper)
+    root = get_root(box)
+    analyze(root, f, x0, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals)
+end
+
+function analyze(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+    box = minimum(root)
+    boxval = value(box)
+    lastval = typemax(boxval)
+    tol_counter = 0
+    while boxval > fvalue && tol_counter <= ndims(box) && count(x->true, leaves(root)) < maxevals
+        lastval = boxval
+        sweep!(root, f, x0, splits, lower, upper)
+        box = minimum(root)
+        boxval = value(box)
+        @assert(boxval <= lastval)
+        if lastval - boxval < atol || lastval - boxval < rtol*(abs(lastval) + abs(boxval))
+            tol_counter += 1
+        else
+            tol_counter = 0
+        end
+    end
+    root, x0
+end
+
+"""
+    xmin, fmin = minimize(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+
+Return the position `xmin` and value `fmin` of the minimum of `f` over the specified domain.
+See [`analyze`](@ref) for information about the input arguments.
+"""
+function minimize(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+    root, x0 = analyze(f, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals)
+    box = minimum(root)
+    return position(box, x0), value(box)
 end

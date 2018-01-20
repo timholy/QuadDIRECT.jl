@@ -277,9 +277,9 @@ near the root and not all dimensions have been split.
 The variant supplying `x0` fills in those dimensions with the corresponding values
 from `x0`.
 """
-position(box::Box) = position!(fill(NaN, ndims(box)), box)
+Base.position(box::Box) = position!(fill(NaN, ndims(box)), box)
 
-function position(box::Box, x0::AbstractVector)
+function Base.position(box::Box, x0::AbstractVector)
     x = similar(x0)
     flag = falses(length(x0))
     position!(x, flag, box, x0)
