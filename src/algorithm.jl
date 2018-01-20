@@ -26,15 +26,17 @@ end
     n = length(xstar)
     root = box = Box{T,n}()
     xtmp = copy(xstar)
+    xcur, fcur = dummyvalue(T), dummyvalue(T)
     for i = 1:n
         xtmp = ipcopy!(xtmp, xstar)
-        box = split!(box, f, xtmp, i, xsplits[i], lower[i], upper[i])
-        xstar = replacecoordinate!(xstar, i, box.parent.xvalues[box.parent_cindex])
+        box = split!(box, f, xtmp, i, xsplits[i], lower[i], upper[i], xcur, fcur)
+        xcur, fcur = box.parent.xvalues[box.parent_cindex], box.parent.fvalues[box.parent_cindex]
+        xstar = replacecoordinate!(xstar, i, xcur)
     end
     box, xstar
 end
 
-function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real, xcur=NaN, fcur=NaN) where T
+function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real, xcur, fcur) where T
     # Evaluate f along the splits, keeping track of the best
     fsplit = MVector3{T}(typemax(T), typemax(T), typemax(T))
     fmin, idxmin = typemax(T), 0
@@ -60,7 +62,7 @@ function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real
     return box.children[idxmin]
 end
 
-function autosplit!(box::Box{T}, f, x0, xtmp, splitdim, xsplitdefaults, lower, upper, oldbox=Set([box])) where T
+function autosplit!(box::Box{T}, f, x0, xtmp, splitdim, xsplitdefaults, lower, upper, visited::Set) where T
     if !isleaf(box)
         # This box already got split along a different dimension
         box = find_smallest_child_leaf(box)
@@ -86,7 +88,10 @@ function autosplit!(box::Box{T}, f, x0, xtmp, splitdim, xsplitdefaults, lower, u
     xsplitdefault = xsplitdefaults[splitdim]
     lwr, upr = lower[splitdim], upper[splitdim]
     p = find_parent_with_splitdim(box, splitdim)
-    isroot(p) && p.splitdim != splitdim && return split!(box, f, xtmp, splitdim, xsplitdefault, lwr, upr)
+    if isroot(p) && p.splitdim != splitdim
+        xcur, fcur = x0[splitdim], box.parent.fvalues[box.parent_cindex]
+        return split!(box, f, xtmp, splitdim, xsplitdefault, lwr, upr, xcur, fcur)
+    end
     bb = boxbounds(p)
     xp, fp = p.parent.xvalues, p.parent.fvalues
     Δx = max(xp[2]-xp[1], xp[3]-xp[2])  # a measure of the "pragmatic" box scale even when the box is infinite
@@ -143,12 +148,12 @@ function autosplit!(box::Box{T}, f, x0, xtmp, splitdim, xsplitdefaults, lower, u
         xtmp = replacecoordinate!(xtmp, splitdim, xmid)
         fmid = f(xtmp)
         xf1, xf2, xf3 = order_pairs(xcur=>fcur, xnew=>fnew, xmid=>fmid)
-        if (length(oldbox) == 1 && first(oldbox) == box) || nbr ∈ oldbox
+        if isempty(visited) || nbr ∈ visited  # split if this is the first or last in the chain
             add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
                         MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
         end
-        nbr ∈ oldbox && return box # don't get into a cycle
-        return autosplit!(nbr, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, push!(oldbox, box))
+        nbr ∈ visited && return box # don't get into a cycle
+        return autosplit!(nbr, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, push!(visited, box))
     end
     # Trisect
     l, r = bb
@@ -183,11 +188,15 @@ end
 
 function sweep!(root::Box, f, x0, splits, lower, upper)
     mes = minimum_edges(root, x0, lower, upper)
+    sweep!(root, mes, f, x0, splits, lower, upper)
+end
+function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper)
     xtmp = similar(x0)
     flag = similar(x0, Bool)
     nsplits = similar(x0, Int)
     nleaves0 = count(x->true, leaves(root))
     nprocessed = 0
+    visited = Set{typeof(root)}()
     for (i, me) in enumerate(mes)
         for item in me
             box = item.l
@@ -199,7 +208,8 @@ function sweep!(root::Box, f, x0, splits, lower, upper)
                 continue
             end
             nprocessed += 1
-            autosplit!(box, f, x0, xtmp, i, splits, lower, upper)
+            empty!(visited)
+            autosplit!(box, f, x0, xtmp, i, splits, lower, upper, visited)
         end
     end
     println(nprocessed, " processed, starting with ", nleaves0, " leaves and ending with ", count(x->true, leaves(root)))

@@ -1,3 +1,6 @@
+dummyvalue(::Type{T}) where T<:AbstractFloat = T(NaN)
+dummyvalue(::Type{T}) where T = typemax(T)
+
 """
    xvert, fvert, qcoef = qfit(xm=>fm, x0=>f0, xp=>fp)
 
