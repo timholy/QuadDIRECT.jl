@@ -192,6 +192,29 @@ function find_smallest_child_leaf(box::Box)
 end
 
 """
+    box = find_leaf_at(root, x)
+
+Return the leaf-node `box` that contains `x`.
+"""
+function find_leaf_at(root::Box, x)
+    isleaf(root) && return root
+    while !isleaf(root)
+        i = root.splitdim
+        found = false
+        for box in (root.children[1], root.children[2], root.children[3])
+            bb = boxbounds(box)
+            if bb[1] <= x[i] <= bb[2]
+                root = box
+                found = true
+                break
+            end
+        end
+        found || error("$(x[i]) not within $(root.minmax)")
+    end
+    root
+end
+
+"""
     box = find_leaf_at_edge(root, x, splitdim, dir)
 
 Return the leaf-node `box` that contains `x` with an edge at `x[splitdim]`.
@@ -242,12 +265,14 @@ from `x0`.
 position(box::Box) = position!(fill(NaN, ndims(box)), box)
 
 function position(box::Box, x0::AbstractVector)
-    x = fill(NaN, ndims(box))
+    x = similar(x0)
     flag = falses(length(x0))
-    position!(x, flag, box)
-    default_position!(x, flag, x0)
+    position!(x, flag, box, x0)
 end
-
+function position!(x, flag, box::Box, x0::AbstractVector)
+    copy!(x, x0)
+    position!(x, flag, box)
+end
 function position!(x, box::Box)
     flag = falses(length(x))
     position!(x, flag, box)
@@ -344,6 +369,12 @@ function boxbounds!(bb, flag, box::Box)
     end
     bb
 end
+function boxbounds!(bb, flag, box::Box, lower, upper)
+    for i = 1:ndims(box)
+        bb[i] = (lower[i], upper[i])
+    end
+    boxbounds!(bb, flag, box)
+end
 
 function width(box::Box, splitdim::Integer, xdefault::Real, lower::Real, upper::Real)
     p = find_parent_with_splitdim(box, splitdim)
@@ -353,6 +384,22 @@ function width(box::Box, splitdim::Integer, xdefault::Real, lower::Real, upper::
 end
 width(box::Box, splitdim::Integer, xdefault, lower, upper) =
     width(box, splitdim, xdefault[splitdim], lower[splitdim], upper[splitdim])
+
+function isinside(x, lower, upper)
+    ret = true
+    for i = 1:length(x)
+        ret &= lower[i] <= x[i] <= upper[i]
+    end
+    ret
+end
+function isinside(x, bb::Vector{Tuple{T,T}}) where T
+    ret = true
+    for i = 1:length(x)
+        bbi = bb[i]
+        ret &= bbi[1] <= x[i] <= bbi[2]
+    end
+    ret
+end
 
 """
     within(x, (left, right), dir)
