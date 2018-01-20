@@ -25,7 +25,6 @@ julia> function camel(x)
             x2s = x2*x2
             return (4 - 2.1*x1s + x1s*x1s/3)*x1s + x1*x2 + (-4 + 4*x2s)*x2s
         end
-end
 ```
 
 ![camel function](images/camel.png)
@@ -46,7 +45,7 @@ julia> root, x0 = analyze(camel, splits, lower, upper)
 (BoxRoot@[NaN, NaN], [0.0, 0.0])
 ```
 
-This creates a tree structure (currently) with 327 boxes, each corresponding to a single function evaluation:
+This creates a tree structure (currently) with a few hundred boxes, each corresponding to a single function evaluation:
 
 ![boxes](images/quaddirect_camel.png)
 
