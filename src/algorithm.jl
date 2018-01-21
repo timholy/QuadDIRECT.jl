@@ -191,7 +191,7 @@ function minimum_edges(root::Box{T,N}, x0, lower, upper; minwidth=zeros(eltype(x
         for i = 1:N
             bb = boxbounds(find_parent_with_splitdim(box, i), lower[i], upper[i])
             bb[2]-bb[1] < minwidth[i] && continue
-            insert!(mes[i], width(box, i, x0, lower, upper), box=>fval)
+            insert!(mes[i], width(box, i, x0, lower, upper), box=>fval+qdelta(box, i))
         end
     end
     return mes
