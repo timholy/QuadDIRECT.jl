@@ -48,8 +48,9 @@ Note that `Δf` might be -Inf, if `box` is unbounded and the quadratic estimate
 is not convex.
 """
 function qdelta(box::Box)
-    xm, x0, xp = box.parent.xvalues
-    fm, f0, fp = box.parent.fvalues
+    xv, fv = box.parent.xvalues, box.parent.fvalues
+    xm, x0, xp = xv[1], xv[2], xv[3]
+    fm, f0, fp = fv[1], fv[2], fv[3]
     fbox = box.parent.fvalues[box.parent_cindex]
     cm, c0, cp = lagrangecoefs(xm=>fm, x0=>f0, xp=>fp)
     qvalue(x) = cm*(x-x0)*(x-xp) + c0*(x-xm)*(x-xp) + cp*(x-xm)*(x-x0)
@@ -532,12 +533,12 @@ end
 abstract type DepthFirstIterator end
 Base.iteratorsize(::Type{<:DepthFirstIterator}) = Base.SizeUnknown()
 
-struct DepthFirstLeafIterator{T} <: DepthFirstIterator
-    root::Box{T}
+struct DepthFirstLeafIterator{B<:Box} <: DepthFirstIterator
+    root::B
 end
 
-struct VisitorBool{T}
-    box::Box{T}
+struct VisitorBool{B<:Box}
+    box::B
     done::Bool
 end
 

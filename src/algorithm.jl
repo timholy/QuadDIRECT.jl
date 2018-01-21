@@ -184,7 +184,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
 end
 
 # A dumb O(N) algorithm for building the minimum-edge structures
-function minimum_edges(root::Box{T,N}, x0, lower, upper; minwidth=zeros(eltype(x0), ndims(root))) where {T,N}
+function minimum_edges(root::Box{T,N}, x0, lower, upper, minwidth=zeros(eltype(x0), ndims(root))) where {T,N}
     mes = [MELink{T,T}(root) for i = 1:N]
     for box in leaves(root)
         fval = box.parent.fvalues[box.parent_cindex]
@@ -208,7 +208,7 @@ function trimschedule!(mes::Vector{<:MELink}, box::Box, splitdim, x0, lower, upp
 end
 
 function sweep!(root::Box, f, x0, splits, lower, upper; minwidth=zeros(eltype(x0), ndims(root)))
-    mes = minimum_edges(root, x0, lower, upper; minwidth=minwidth)
+    mes = minimum_edges(root, x0, lower, upper, minwidth)
     sweep!(root, mes, f, x0, splits, lower, upper; minwidth=minwidth)
 end
 function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper; minwidth=zeros(eltype(x0), ndims(root)))
