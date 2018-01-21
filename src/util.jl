@@ -13,6 +13,20 @@ Note that if the three points lie on a line, `qcoef == 0` and both `xvert` and `
 be infinite.
 """
 function qfit(xfm, xf0, xfp)
+    cm, c0, cp = lagrangecoefs(xfm, xf0, xfp)
+    xm, fm = xfm
+    x0, f0 = xf0
+    xp, fp = xfp
+    qvalue(x) = cm*(x-x0)*(x-xp) + c0*(x-xm)*(x-xp) + cp*(x-xm)*(x-x0)
+    qcoef = cm+c0+cp
+    if fm == f0 == fp
+        return x0, f0, zero(qcoef) # when it's flat, use the middle point as the "vertex"
+    end
+    xvert = (cm*(x0+xp) + c0*(xm+xp) + cp*(xm+x0))/(2*qcoef)
+    return xvert, qvalue(xvert), qcoef
+end
+
+@inline function lagrangecoefs(xfm, xf0, xfp)
     xm, fm = xfm
     x0, f0 = xf0
     xp, fp = xfp
@@ -20,13 +34,53 @@ function qfit(xfm, xf0, xfp)
     cm = fm/((xm-x0)*(xm-xp))  # coefficients of Lagrange polynomial
     c0 = f0/((x0-xm)*(x0-xp))
     cp = fp/((xp-xm)*(xp-x0))
-    qcoef = cm+c0+cp
+    cm, c0, cp
+end
+
+"""
+    Δf = qdelta(box)
+
+Return the difference `fmin - fbox`, where `fbox` is the value of `f` at the evaluation
+point of `box` and `fmin` is the minimum of a one-dimensional quadratic fit of `f` (using
+the data in `box.parent`) over the bounds of `box`.
+
+Note that `Δf` might be -Inf, if `box` is unbounded and the quadratic estimate
+is not convex.
+"""
+function qdelta(box::Box)
+    xm, x0, xp = box.parent.xvalues
+    fm, f0, fp = box.parent.fvalues
+    fbox = box.parent.fvalues[box.parent_cindex]
+    cm, c0, cp = lagrangecoefs(xm=>fm, x0=>f0, xp=>fp)
     qvalue(x) = cm*(x-x0)*(x-xp) + c0*(x-xm)*(x-xp) + cp*(x-xm)*(x-x0)
-    if fm == f0 == fp
-        return x0, f0, zero(qcoef)
-    end
+    bb = boxbounds(box)
+    qcoef = cm+c0+cp
     xvert = (cm*(x0+xp) + c0*(xm+xp) + cp*(xm+x0))/(2*qcoef)
-    return xvert, qvalue(xvert), qcoef
+    if qcoef > 0 && bb[1] <= xvert <= bb[2]
+        # Convex and the vertex is inside the box
+        return qvalue(xvert) - fbox
+    end
+    # Otherwise, the minimum is achieved at one of the edges
+    # This needs careful evaluation in the case of infinite boxes to avoid Inf - Inf == NaN.
+    if isinf(bb[1]) || isinf(bb[2])
+        lcoef = -cm*(x0+xp) - c0*(xm+xp) - cp*(xm+x0)
+        ccoef = cm*x0*xp + c0*xm*xp + cp*xm*x0
+        if qcoef == 0  # the function is linear
+            let lcoef = lcoef, ccoef = ccoef
+                lvalue(x) = lcoef*x + ccoef
+                return min(lvalue(bb[1]), lvalue(bb[2])) - fbox
+            end
+        else
+            qvalue_inf(x) = isinf(x) ? abs(x)*sign(qcoef) : qvalue(x)
+            return min(qvalue_inf(bb[1]), qvalue_inf(bb[2])) - fbox
+        end
+    end
+    return min(qvalue(bb[1]), qvalue(bb[2])) - fbox
+end
+
+function qdelta(box::Box{T}, splitdim::Integer) where T
+    p = find_parent_with_splitdim(box, splitdim)
+    return p.parent.splitdim == splitdim ? qdelta(p) : zero(T)
 end
 
 ## Minimum Edge List utilities
@@ -177,7 +231,8 @@ end
     boxp = find_parent_with_splitdim(box, splitdim::Integer)
 
 Return the first node at or above `box` who's parent box was split
-along dimension `splitdim`.
+along dimension `splitdim`. If `box` has not yet been split along
+`splitdim`, returns the root box.
 """
 function find_parent_with_splitdim(box::Box, splitdim::Integer)
     while !isroot(box)

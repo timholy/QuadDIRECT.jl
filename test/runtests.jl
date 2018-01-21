@@ -71,6 +71,41 @@ end
     xvert, fvert, qcoef = QuadDIRECT.qfit(x1=>q(x1), x2=>q(x2), x3=>q(x3))
     @test qcoef ≈ a
     @test xvert ≈ -b/(2a)
+
+    q(x, y, z) = x^2 - y^2 + z
+    x0 = y0 = z0 = 0
+    root = QuadDIRECT.Box{Float64,3}()
+    QuadDIRECT.add_children!(root, 1, [-1, 0.2, 1], [q(-1,y0,z0), q(0.2,y0,z0), q(1,y0,z0)], -Inf, Inf)
+    @test QuadDIRECT.qdelta(root.children[1]) ≈ q(-0.4,y0,z0) - q(-1,y0,z0)
+    @test QuadDIRECT.qdelta(root.children[2]) ≈ q(0,y0,z0) - q(0.2,y0,z0)
+    @test QuadDIRECT.qdelta(root.children[3]) ≈ q(0.6,y0,z0) - q(1,y0,z0)
+    for i = 1:3
+        @test QuadDIRECT.qdelta(root.children[i], 1) == QuadDIRECT.qdelta(root.children[i])
+        @test QuadDIRECT.qdelta(root.children[i], 2) == 0
+        @test QuadDIRECT.qdelta(root.children[i], 3) == 0
+    end
+    p = root.children[3]
+    x0 = p.parent.xvalues[p.parent_cindex]
+    QuadDIRECT.add_children!(p, 2, [-1, 0.2, 1], [q(x0,-1,z0), q(x0,0.2,z0), q(x0,1,z0)], -Inf, Inf)
+    @test QuadDIRECT.qdelta(p.children[1]) == -Inf
+    @test QuadDIRECT.qdelta(p.children[2]) ≈ q(x0,0.6,z0) - q(x0,0.2,z0)
+    @test QuadDIRECT.qdelta(p.children[3]) == -Inf
+    for i = 1:3
+        @test QuadDIRECT.qdelta(p.children[i], 2) == QuadDIRECT.qdelta(p.children[i])
+        @test QuadDIRECT.qdelta(p.children[i], 1) == QuadDIRECT.qdelta(p)
+        @test QuadDIRECT.qdelta(p.children[i], 3) == 0
+    end
+    p = p.children[1]
+    y0 = p.parent.xvalues[p.parent_cindex]
+    QuadDIRECT.add_children!(p, 3, [-1, 0.2, 1], [q(x0,y0,-1), q(x0,y0,0.2), q(x0,y0,1)], -Inf, Inf)
+    @test QuadDIRECT.qdelta(p.children[1]) == -Inf
+    @test QuadDIRECT.qdelta(p.children[2]) ≈ q(x0,y0,-0.4) - q(x0,y0,0.2)
+    @test QuadDIRECT.qdelta(p.children[3]) ≈ q(x0,y0, 0.6) - q(x0,y0,1)
+    for i = 1:3
+        @test QuadDIRECT.qdelta(p.children[i], 3) == QuadDIRECT.qdelta(p.children[i])
+        @test QuadDIRECT.qdelta(p.children[i], 2) == QuadDIRECT.qdelta(p)
+        @test QuadDIRECT.qdelta(p.children[i], 1) == QuadDIRECT.qdelta(p.parent)
+    end
 end
 
 function camel(x)
