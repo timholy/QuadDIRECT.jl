@@ -201,9 +201,13 @@ end
     r = QuadDIRECT.get_root(box)
     mes = QuadDIRECT.minimum_edges(r, x0, lower, upper)
     @test [x.w for x in mes[1]] == [1.0, Inf]
-    @test [x.f for x in mes[1]] == [0.0, camel([-2.0,0.0])]
-    @test [x.w for x in mes[2]] == [Inf]
-    @test [x.f for x in mes[2]] == [0.0]
+    fs = [x.f for x in mes[1]]
+    bxs = [x.l for x in mes[1]]
+    @test length(fs) == 2 && all([fs[i] <= camel(position(bxs[i], x0)) for i = 1:2])
+    @test [x.w for x in mes[2]] == [0.5, Inf]
+    fs = [x.f for x in mes[1]]
+    bxs = [x.l for x in mes[1]]
+    @test length(fs) == 2 && all([fs[i] <= camel(position(bxs[i], x0)) for i = 1:2])
 end
 
 @testset "Sweeps" begin
@@ -233,7 +237,7 @@ end
 
     splits = ([-11,-10,-9], [-7,-6,-5])
     lower, upper = [-Inf, -Inf], [Inf, Inf]
-    xmin, fmin = minimize(canyon, splits, lower, upper; atol=1e-5)
-    @test fmin < 1e-5
-    @test norm(xmin) < 4e-3
+    xmin, fmin = minimize(canyon, splits, lower, upper; atol=1e-3)
+    @test fmin < 0.015
+    @test norm(xmin) < 0.3
 end
