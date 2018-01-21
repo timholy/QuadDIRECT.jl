@@ -218,7 +218,7 @@ function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper; m
     nleaves0 = count(x->true, leaves(root))
     nprocessed = 0
     visited = Set{typeof(root)}()
-    dimorder = randperm(ndims(root)) # makes the results stochastic. Introduce a deterministic permutation?
+    dimorder = sortperm(length.(mes))  # process the dimensions with the shortest queues first
     for i in dimorder
         me = mes[i]
         while !isempty(me)

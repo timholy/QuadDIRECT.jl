@@ -147,6 +147,8 @@ function popfirst!(mel::MELink)
     return item
 end
 
+Base.length(mel::MELink) = count(x->true, mel)
+
 function Base.show(io::IO, mel::MELink)
     print(io, "List(")
     next = mel.next

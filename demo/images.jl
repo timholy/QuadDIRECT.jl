@@ -63,7 +63,6 @@ splits = ([-15, 0, 15], [-15, 0, 15], [-pi/2, 0, pi/2])
 minwidth = [1, 1, 0.02]
 
 # Simple iterative analysis
-srand(1)  # because the dimension permutation adds an element of randomness
 root, x0 = analyze(f, splits, lower, upper; maxevals=10, minwidth=minwidth)
 # Iterative refinement with control over convergence. `fvalue=0.02` forces it to keep looking until it finds something good.
 warn("This will take a long time")
