@@ -62,6 +62,9 @@ function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real
     return box.children[idxmin]
 end
 
+# Splits a box. If the "tilt" over the domain of the
+# box suggests that one of its neighbors might be even lower,
+# recursively calls itself to split that box, too.
 function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, xsplitdefaults, lower, upper, minwidth, visited::Set) where T
     box ∈ visited && error("already visited box")
     if !isleaf(box)
@@ -70,7 +73,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
         xtmp = position(box, x0)
     end
     if splitdim == 0
-        # If we entered this box from a neighbor, just choose an axis that has been least-split
+        # If we entered this box from a neighbor, just choose an axis that has been split the least
         nsplits = count_splits(box)
         splitdim = indmin(nsplits)
         if nsplits[splitdim] > 0
@@ -78,7 +81,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
             bbs = boxbounds(box, lower, upper)
             if all(isfinite, bbs[splitdim])
                 for (i, bb) in enumerate(bbs)
-                    if !isfinite(bb[1]) || !isfinite(bb[2])
+                    if !all(isfinite, bb)
                         splitdim = i
                         break
                     end
@@ -154,11 +157,9 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
         xtmp = replacecoordinate!(xtmp, splitdim, xmid)
         fmid = f(xtmp)
         xf1, xf2, xf3 = order_pairs(xcur=>fcur, xnew=>fnew, xmid=>fmid)
-        if isempty(visited) || nbr ∈ visited  # split if this is the first or last in the chain
             add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
                         MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
             trimschedule!(mes, box, splitdim, x0, lower, upper)
-        end
         (!success || nbr ∈ visited) && return box # don't get into a cycle
         return autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, minwidth, push!(visited, box))
     end
@@ -187,7 +188,7 @@ end
 function minimum_edges(root::Box{T,N}, x0, lower, upper, minwidth=zeros(eltype(x0), ndims(root))) where {T,N}
     mes = [MELink{T,T}(root) for i = 1:N]
     for box in leaves(root)
-        fval = box.parent.fvalues[box.parent_cindex]
+        fval = value(box)
         for i = 1:N
             bb = boxbounds(find_parent_with_splitdim(box, i), lower[i], upper[i])
             bb[2]-bb[1] < minwidth[i] && continue

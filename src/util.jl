@@ -642,6 +642,20 @@ function biggest_interval(a, b, c, d)
     return (c, d)
 end
 
+function ensure_distinct(x::T, xref, bb::Tuple{Real,Real}; minfrac = 0.1) where T
+    Δx = min(xref - bb[1], bb[2] - xref)
+    if !isfinite(Δx)
+        x != xref && return x
+        return xref + 1
+    end
+    Δxmin = T(minfrac*Δx)
+    if abs(x - xref) < Δxmin
+        s = x == xref ? 1 : sign(x-xref)
+        x = T(xref + Δxmin*s)
+    end
+    return x
+end
+
 function ensure_distinct(x::T, x1, x2, bb::Tuple{Real,Real}; minfrac = 0.1) where T
     x1, x2 = lohi(x1, x2)
     Δxmin = minfrac*(x2-x1)
