@@ -1,6 +1,6 @@
 module QuadDIRECT
 
-using StaticArrays
+using StaticArrays, PositiveFactorizations
 using Compat
 
 export leaves, treeprint, value, analyze, analyze!, minimize

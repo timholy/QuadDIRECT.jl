@@ -267,6 +267,130 @@ function find_smallest_child_leaf(box::Box)
 end
 
 """
+    npoints_exceeds(box, nthresh)
+
+Return true if the number of function evaluations in `box` and its ancestors exceeds `nthresh`.
+This is a quick (and not very accurate) assessment of whether `gather_independent_points`
+is likely to succeed.
+"""
+function npoints_exceeds(box, nthresh)
+    n = 1
+    hassplit = fill(false, ndims(box))
+    while !isroot(box) && n < nthresh
+        box = parent(box)
+        hassplit[box.splitdim] = true
+        nnz = sum(hassplit)
+        if 2*n < (nnz+1)*(nnz+2)
+            n += 1
+        end
+        if 2*n < (nnz+1)*(nnz+2)
+            n += 1
+        end
+    end
+    return n >= nthresh
+end
+
+"""
+    coefs, points, values, success = gather_independent_points(box, nparams)
+"""
+function gather_independent_points(box::Box{T,N}, x0, nparams) where {T,N}
+    points = Matrix{T}(uninitialized, N, nparams)
+    coefs = similar(points, (nparams, nparams))
+    values = Vector{T}(uninitialized, nparams)
+    xbox = position(box, x0)
+    col = 1
+    points[:,col] .= xbox
+    values[col] = value(box)
+    setcol!(coefs, col, xbox, xbox)
+    hassplit = fill(false, ndims(box))
+    while !isroot(box) && col < nparams
+        cindex = box.parent_cindex
+        box = box.parent
+        hassplit[box.splitdim] = true
+        nnz = sum(hassplit)
+        if col >= (nnz+1)*(nnz+2)÷2
+            continue
+        end
+        xtmp = position(box, x0)
+        xp, fp = box.xvalues, box.fvalues
+        j = 1
+        if j == cindex
+            j += 1
+        end
+        xtmp = replacecoordinate!(xtmp, box.splitdim, xp[j])
+        setcol!(coefs, col+1, xtmp, xbox)
+        coefs_so_far = view(coefs, :, 1:col)
+        coefs_new = view(coefs, :, col+1)
+        c = coefs_so_far \ coefs_new
+        if norm(coefs_so_far*c - coefs_new) > 1e-8
+            points[:,col+=1] = xtmp
+            values[col] = fp[j]
+        end
+        if col >= (nnz+1)*(nnz+2)÷2
+            continue
+        end
+        j += 1
+        if j == cindex
+            j += 1
+        end
+        xtmp = replacecoordinate!(xtmp, box.splitdim, xp[j])
+        setcol!(coefs, col+1, xtmp, xbox)
+        coefs_so_far = view(coefs, :, 1:col)
+        coefs_new = view(coefs, :, col+1)
+        c = coefs_so_far \ coefs_new
+        if norm(coefs_so_far*c - coefs_new) > 1e-8
+            points[:,col+=1] = xtmp
+            values[col] = fp[j]
+        end
+    end
+    return coefs, values, points, col == nparams
+end
+
+function count_n_collinear_along_dim!(nc, points, col, xtmp)
+    N = length(nc)
+    fill!(nc, 0)
+    for j = 1:col
+        nsame = 0
+        diffindex = 0
+        for i = 1:N
+            if points[i,j] == xtmp[i]
+                nsame += 1
+            else
+                diffindex = i
+            end
+        end
+        if nsame == N-1
+            nc[diffindex] += 1
+        end
+    end
+    return nc
+end
+
+"""
+    dims_targeted = qtargeted(box, xsource, lower, upper)
+
+Returns coordinatewise `true` if `xsource` is external to an ancestor of `box`,
+split along the corresponding dimension, that has already been
+targeted as a minimum by a full quadratic model.
+"""
+function qtargeted(box, xsource, lower, upper)
+    bbs = boxbounds(box, lower, upper)
+    dims_targeted = falses(ndims(box))
+    while true
+        if box.qtargeted
+            if !isinside(xsource, bbs)
+                dims_targeted[box.splitdim] = true
+            end
+        end
+        isroot(box) && return dims_targeted
+        box = box.parent
+        if !isroot(box)
+            bbs[box.parent.splitdim] = boxbounds(box)
+        end
+    end
+end
+
+"""
     box = find_leaf_at(root, x)
 
 Return the leaf-node `box` that contains `x`.
@@ -418,6 +542,16 @@ function boxbounds(box::Box{T}, lower::AbstractVector, upper::AbstractVector) wh
     length(lower) == length(upper) == ndims(box) || throw(DimensionMismatch("lower and upper must match dimensions of box"))
     bb = [(T(lower[i]), T(upper[i])) for i = 1:ndims(box)]
     boxbounds!(bb, box)
+end
+
+"""
+    bb = boxbounds(box, splitdim::Integer, lower::AbstractVector, upper::AbstractVector)
+
+Compute the bounds of `box` along dimension `splitdim`.
+"""
+function boxbounds(box::Box{T}, splitdim::Integer, lower::AbstractVector, upper::AbstractVector) where T
+    p = find_parent_with_splitdim(box, splitdim)
+    boxbounds(p, lower[splitdim], upper[splitdim])
 end
 
 function boxbounds!(bb, box::Box)
@@ -669,4 +803,63 @@ function ensure_distinct(x::T, x1, x2, bb::Tuple{Real,Real}; minfrac = 0.1) wher
         x = T(min(bb[2], x2 + Δxmin*s))
     end
     return x
+end
+
+"""
+    t, exitdim = pathlength_box_exit(x0, dx, bb)
+
+Given a ray `x0 + t*dx`, compute the value of `t` at which the ray exits the box
+delimited by `bb` (a vector of `(lo, hi)` tuples). Also return the coordinate dimension
+along which the exit occurs.
+"""
+function pathlength_box_exit(x0, dx, bb)
+    t = oftype((bb[1][1] - x0[1])/dx[1], Inf)
+    exitdim = 0
+    for i = 1:length(x0)
+        xi, dxi, bbi = x0[i], dx[i], bb[i]
+        ti = (ifelse(dxi >= 0, bbi[2], bbi[1]) - xi)/dxi
+        if ti < t
+            t = ti
+            exitdim = i
+        end
+    end
+    t, exitdim
+end
+
+"""
+    t, intersectdim = pathlength_hyperplane_intersect(x0, dx, xtarget, tmax)
+
+Compute the maximum pathlength `t` (up to a value of `tmax`) at which the ray `x0 + t*dx`
+intersects one of the hyperplanes specified by `x[i] = xtarget[i]` for any dimension `i`.
+"""
+function pathlength_hyperplane_intersect(x0, dx, xtarget, tmax)
+    t = zero(typeof((xtarget[1] - x0[1])/dx[1]))
+    intersectdim = 0
+    for i = 1:length(x0)
+        xi, dxi, xti = x0[i], dx[i], xtarget[i]
+        ti = (xti - xi)/dxi
+        if ti <= tmax && ti > t
+            t = ti
+            intersectdim = i
+        end
+    end
+    t, intersectdim
+end
+
+"""
+    a, b, c = pick3(a, b, (lower::Real, upper::Real))
+
+Returns an ordered triple `a, b, c`, with two agreeing with the input `a` and `b`,
+and the third point bisecting the largest interval between `a`, `b`, and the edges
+`lower`, `upper`.
+"""
+function pick3(a, b, bb)
+    a, b = lohi(a, b)
+    imin, imax = biggest_interval(bb[1], a, b, bb[2])
+    if isinf(imin)
+        return a-2*(b-a), a, b
+    elseif isinf(imax)
+        return a, b, b+2*(b-a)
+    end
+    return a, b, c = lohi(a, b, (imin+imax)/2)
 end

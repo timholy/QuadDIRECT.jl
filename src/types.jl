@@ -76,12 +76,14 @@ mutable struct Box{T,N}
     parent::Box{T,N}
     parent_cindex::Int    # of its parent's children, which one is this?
     splitdim::Int         # the dimension along which this box has been split, or 0 if this is a leaf node
+    qtargeted::Bool       # true if the box has been targeted as a minimum by a full (dense) quadratic fit
     minmax::Tuple{T,T}    # the outer edges not corresponding to one of the parent's xvalues (splits that occur between dots in Fig 2)
     xvalues::MVector3{T}  # the values of x_splitdim at which f is evaluated
     fvalues::MVector3{T}  # the corresponding values of f
     children::MVector3{Box{T,N}}
 
     function default!(box::Box{T,N}) where {T,N}
+        box.qtargeted = false
         box.minmax = (typemax(T), typemin(T))
         box.xvalues = MVector3{T}(typemax(T), zero(T), typemin(T))
         box.fvalues = MVector3{T}(zero(T), zero(T), zero(T))

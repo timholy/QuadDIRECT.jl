@@ -100,6 +100,15 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
     end
     bb = boxbounds(p)
     bb[2]-bb[1] >= minwidth[splitdim] || return box
+    N = ndims(box)
+    nqn = ((N+1)*(N+2))÷2  # number of points needed for quasi-Newton approach
+    if npoints_exceeds(box, nqn)
+        coefs, values, positions, success = gather_independent_points(box, x0, nqn)
+        if success
+            success = quasinewton!(box, mes, coefs, values, f, x0, splitdim, lower, upper)
+            success && return box
+        end
+    end
     xp, fp = p.parent.xvalues, p.parent.fvalues
     Δx = max(xp[2]-xp[1], xp[3]-xp[2])  # a measure of the "pragmatic" box scale even when the box is infinite
     xcur = xp[p.parent_cindex]
@@ -157,9 +166,9 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
         xtmp = replacecoordinate!(xtmp, splitdim, xmid)
         fmid = f(xtmp)
         xf1, xf2, xf3 = order_pairs(xcur=>fcur, xnew=>fnew, xmid=>fmid)
-            add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
-                        MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
-            trimschedule!(mes, box, splitdim, x0, lower, upper)
+        add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
+                    MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
+        trimschedule!(mes, box, splitdim, x0, lower, upper)
         (!success || nbr ∈ visited) && return box # don't get into a cycle
         return autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, minwidth, push!(visited, box))
     end
@@ -183,6 +192,144 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
     trimschedule!(mes, box, splitdim, x0, lower, upper)
     return box
 end
+
+# Use regression to compute the best-fit quadratic model (with a dense Hessian)
+function full_quadratic_fit(coefs::AbstractMatrix{T}, values::AbstractVector{T}) where T
+    sz = size(coefs, 1)
+    N = ceil(Int, sqrt(2*sz))
+    while (N+1)*(N+2)÷2 > sz
+        N -= 1
+    end
+    @assert((N+1)*(N+2) == 2*size(coefs, 1))
+    B = Matrix{T}(uninitialized, N, N)
+    g = Vector{T}(uninitialized, N)
+    params = svdfact(coefs') \ values
+    k = 0
+    for j = 1:N
+        B[j, j] = params[k+=1]
+        for i = 1:j-1
+            B[i, j] = B[j, i] = params[k+=1]
+        end
+    end
+    for i = 1:N
+        g[i] = params[k+=1]
+    end
+    c = params[end]
+    return B, g, c
+end
+
+function setcol!(coefs, col, x, xref)
+    N = length(x)
+    nparams = ((N+1)*(N+2))÷2
+    k = (col - 1)*nparams
+    if length(coefs) < k+nparams
+        resize!(coefs, k+nparams)
+    end
+    # Coefficients of the Hessian
+    for j = 1:N
+        dxj = x[j] - xref[j]
+        coefs[k+=1] = 0.5*dxj*dxj
+        for i = 1:j-1
+            coefs[k+=1] = (x[i]-xref[i])*dxj
+        end
+    end
+    # Coefficients of the gradient
+    for i = 1:N
+        coefs[k+=1] = x[i]-xref[i]
+    end
+    # Coefficient of the constant
+    coefs[k+=1] = 1
+    coefs
+end
+
+function quasinewton!(box::Box{T}, mes, coefs, values, f, x0, splitdim, lower, upper, itermax = 20) where T
+    B, g, c = full_quadratic_fit(coefs, values)
+    cB = cholfact(Positive, B)
+    Δx = -(cB \ g)
+    α = T(1.0)
+    x = position(box, x0)
+    iter = 0
+    while !isinside(x + α*Δx, lower, upper) && iter < itermax
+        α /= 2
+        iter += 1
+    end
+    iter == itermax && return false
+    iter = 0 # the above weren't "real" iterations, so reset
+    root = get_root(box)
+    # Do a backtracking linesearch, splitting any boxes that we encounter along the way
+    while iter < itermax
+        iter += 1
+        xtarget = x + α*Δx
+        # TODO: rewrite this to try f(xtarget), and if it's lower start splitting boxes.
+        # (If not, backtrack without making any boxes. This will break the correspondence btw
+        # function evaluation and leaves. Bummer.)
+        # The problem with the current implementation is that even a great step triggers
+        # backtracking because the coordinate-aligned approximation is too coarse.
+        leaf = find_leaf_at(root, xtarget)
+        xleaf = position(leaf, x0)
+        # If leaf or one of its ancestors has been targeted before from an "external" box,
+        # terminate. The only allowed re-targetings are from inside the narrowest box yet
+        # targeted. This prevents running many line searches that all point to the same minimum.
+        if leaf != box
+            dims_targeted = qtargeted(leaf, x, lower, upper)
+            if all(dims_targeted)
+                iter == 1 && record_targeted!(mes, leaf, splitdim)
+                return false
+            end
+        else
+            dims_targeted = falses(ndims(leaf))
+        end
+        leaf.qtargeted = true
+        # For consistency with the tree structure, we can change only one coordinate of
+        # xleaf. Pick the one that yields the smallest value as predicted by the
+        # quadratic model.
+        xtest = copy(xleaf)
+        q(x) = (x'*B*x)/2 + g'*x + c
+        imin, fmin = 0, typemax(T)
+        for i = 1:ndims(leaf)
+            dims_targeted[i] && continue
+            xtest = replacecoordinate!(xtest, i, xtarget[i])
+            qx = q(xtest)
+            if qx < fmin
+                fmin = qx
+                imin = i
+            end
+        end
+        bb = boxbounds(leaf, imin, lower, upper)
+        xcur = xleaf[imin]
+        xt = ensure_distinct(xtarget[imin], xcur, bb)
+        a, b, c = pick3(xcur, xt, bb)
+        split!(leaf, f, xleaf, imin, MVector3{T}(a, b, c), bb..., xleaf[imin], value(leaf))
+        # return true
+        # end
+        # # We're going to evaluate f inside leaf. For consistency with the tree structure,
+        # # we need to match the position of the evaluation point in leaf at all but one
+        # # coordinate. First, match the coordinate with the farthest intersection between
+        # # the ray and the coordinate hyperplanes.
+        # bbs = boxbounds(leaf, lower, upper)
+        # texit = pathlength_box_exit(x, Δx, bbs)[1]
+        # @show texit
+        # tmax = min(oftype(texit, 1), texit)
+        # t, intersectdim = pathlength_hyperplane_intersect(x, Δx, xleaf, tmax)
+        # # At t, it matches xleaf[intersectdim]. We need to match N-2 remaining coordinates.
+        # @assert(t > 0 && intersectdim != 0)
+        # @show t intersectdim
+        # xtarget = x + t*Δx
+        # @show x xtarget xleaf
+        # # Pick a 3rd point
+        # bb = bbs[intersectdim]
+        # a, b, c = pick3(xleaf[intersectdim], xtarget[intersectdim], bb)
+        # split!(leaf, f, xleaf, intersectdim, MVector3{T}(a, b, c), bb..., xleaf[intersectdim], value(leaf))
+        if minimum(leaf.fvalues) < value(box) || leaf == box
+            return true
+        end
+        α /= 2
+    end
+    return false
+end
+
+# Might want to add leaf to mes?
+record_targeted!(mes, leaf, splitdim) = nothing
 
 # A dumb O(N) algorithm for building the minimum-edge structures
 # For large trees, this is the bottleneck

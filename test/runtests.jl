@@ -64,48 +64,30 @@ using Base.Test
     @test i == 21
 end
 
-@testset "Quadratic fit" begin
-    a, b, c = rand(), rand(), rand()
-    q(x) = a*x^2 + b*x + c
-    x1, x2, x3 = sort(rand(3))
-    xvert, fvert, qcoef = QuadDIRECT.qfit(x1=>q(x1), x2=>q(x2), x3=>q(x3))
-    @test qcoef ≈ a
-    @test xvert ≈ -b/(2a)
+@testset "Rays" begin
+    bb = [(-1,1), (-1,1)]
+    t, exitdim = QuadDIRECT.pathlength_box_exit([0, 0.5], [1, 1], bb)
+    @test t ≈ 0.5 && exitdim == 2
+    t, exitdim = QuadDIRECT.pathlength_box_exit([0, 0.5], [1, 0.3], bb)
+    @test t ≈ 1 && exitdim == 1
+    t, exitdim = QuadDIRECT.pathlength_box_exit([0, 0.5], [1, -1], bb)
+    @test t ≈ 1 && exitdim == 1
+    t, exitdim = QuadDIRECT.pathlength_box_exit([0, 0.5], [1, -3], bb)
+    @test t ≈ 1/2 && exitdim == 2
+    t, exitdim = QuadDIRECT.pathlength_box_exit([0, 0.5], [1, 0], bb)
+    @test t ≈ 1 && exitdim == 1
+    t, exitdim = QuadDIRECT.pathlength_box_exit([0, 0.5], [0, 0.25], bb)
+    @test t ≈ 2 && exitdim == 2
+    bb = [(-1,Inf), (-1,1)]
+    t, exitdim = QuadDIRECT.pathlength_box_exit([0, 0.5], [1, 0.3], bb)
+    @test t ≈ 5/3 && exitdim == 2
 
-    q(x, y, z) = x^2 - y^2 + z
-    x0 = y0 = z0 = 0
-    root = QuadDIRECT.Box{Float64,3}()
-    QuadDIRECT.add_children!(root, 1, [-1, 0.2, 1], [q(-1,y0,z0), q(0.2,y0,z0), q(1,y0,z0)], -Inf, Inf)
-    @test QuadDIRECT.qdelta(root.children[1]) ≈ q(-0.4,y0,z0) - q(-1,y0,z0)
-    @test QuadDIRECT.qdelta(root.children[2]) ≈ q(0,y0,z0) - q(0.2,y0,z0)
-    @test QuadDIRECT.qdelta(root.children[3]) ≈ q(0.6,y0,z0) - q(1,y0,z0)
-    for i = 1:3
-        @test QuadDIRECT.qdelta(root.children[i], 1) == QuadDIRECT.qdelta(root.children[i])
-        @test QuadDIRECT.qdelta(root.children[i], 2) == 0
-        @test QuadDIRECT.qdelta(root.children[i], 3) == 0
-    end
-    p = root.children[3]
-    x0 = p.parent.xvalues[p.parent_cindex]
-    QuadDIRECT.add_children!(p, 2, [-1, 0.2, 1], [q(x0,-1,z0), q(x0,0.2,z0), q(x0,1,z0)], -Inf, Inf)
-    @test QuadDIRECT.qdelta(p.children[1]) == -Inf
-    @test QuadDIRECT.qdelta(p.children[2]) ≈ q(x0,0.6,z0) - q(x0,0.2,z0)
-    @test QuadDIRECT.qdelta(p.children[3]) == -Inf
-    for i = 1:3
-        @test QuadDIRECT.qdelta(p.children[i], 2) == QuadDIRECT.qdelta(p.children[i])
-        @test QuadDIRECT.qdelta(p.children[i], 1) == QuadDIRECT.qdelta(p)
-        @test QuadDIRECT.qdelta(p.children[i], 3) == 0
-    end
-    p = p.children[1]
-    y0 = p.parent.xvalues[p.parent_cindex]
-    QuadDIRECT.add_children!(p, 3, [-1, 0.2, 1], [q(x0,y0,-1), q(x0,y0,0.2), q(x0,y0,1)], -Inf, Inf)
-    @test QuadDIRECT.qdelta(p.children[1]) == -Inf
-    @test QuadDIRECT.qdelta(p.children[2]) ≈ q(x0,y0,-0.4) - q(x0,y0,0.2)
-    @test QuadDIRECT.qdelta(p.children[3]) ≈ q(x0,y0, 0.6) - q(x0,y0,1)
-    for i = 1:3
-        @test QuadDIRECT.qdelta(p.children[i], 3) == QuadDIRECT.qdelta(p.children[i])
-        @test QuadDIRECT.qdelta(p.children[i], 2) == QuadDIRECT.qdelta(p)
-        @test QuadDIRECT.qdelta(p.children[i], 1) == QuadDIRECT.qdelta(p.parent)
-    end
+    t, intersectdim = QuadDIRECT.pathlength_hyperplane_intersect([0, 0.5], [1, 1], [2, 2], Inf)
+    @test t ≈ 2 && intersectdim == 1
+    t, intersectdim = QuadDIRECT.pathlength_hyperplane_intersect([0, 0.5], [1, 1], [2, 2], 1.8)
+    @test t ≈ 1.5 && intersectdim == 2
+    t, intersectdim = QuadDIRECT.pathlength_hyperplane_intersect([0, 0.5], [1, 1], [2, 2], 1)
+    @test t == 0 && intersectdim == 0
 end
 
 function camel(x)
@@ -193,6 +175,64 @@ end
         @test QuadDIRECT.isleaf(nbr)
         @test QuadDIRECT.isparent(box.children[2], nbr)
     end
+end
+
+@testset "Quadratic fit" begin
+    # qfit tests
+    a, b, c = rand(), rand(), rand()
+    q(x) = a*x^2 + b*x + c
+    x1, x2, x3 = sort(rand(3))
+    xvert, fvert, qcoef = QuadDIRECT.qfit(x1=>q(x1), x2=>q(x2), x3=>q(x3))
+    @test qcoef ≈ a
+    @test xvert ≈ -b/(2a)
+
+    # qdelta tests
+    q(x, y, z) = x^2 - y^2 + z
+    x0 = y0 = z0 = 0
+    root = QuadDIRECT.Box{Float64,3}()
+    QuadDIRECT.add_children!(root, 1, [-1, 0.2, 1], [q(-1,y0,z0), q(0.2,y0,z0), q(1,y0,z0)], -Inf, Inf)
+    @test QuadDIRECT.qdelta(root.children[1]) ≈ q(-0.4,y0,z0) - q(-1,y0,z0)
+    @test QuadDIRECT.qdelta(root.children[2]) ≈ q(0,y0,z0) - q(0.2,y0,z0)
+    @test QuadDIRECT.qdelta(root.children[3]) ≈ q(0.6,y0,z0) - q(1,y0,z0)
+    for i = 1:3
+        @test QuadDIRECT.qdelta(root.children[i], 1) == QuadDIRECT.qdelta(root.children[i])
+        @test QuadDIRECT.qdelta(root.children[i], 2) == 0
+        @test QuadDIRECT.qdelta(root.children[i], 3) == 0
+    end
+    p = root.children[3]
+    x0 = p.parent.xvalues[p.parent_cindex]
+    QuadDIRECT.add_children!(p, 2, [-1, 0.2, 1], [q(x0,-1,z0), q(x0,0.2,z0), q(x0,1,z0)], -Inf, Inf)
+    @test QuadDIRECT.qdelta(p.children[1]) == -Inf
+    @test QuadDIRECT.qdelta(p.children[2]) ≈ q(x0,0.6,z0) - q(x0,0.2,z0)
+    @test QuadDIRECT.qdelta(p.children[3]) == -Inf
+    for i = 1:3
+        @test QuadDIRECT.qdelta(p.children[i], 2) == QuadDIRECT.qdelta(p.children[i])
+        @test QuadDIRECT.qdelta(p.children[i], 1) == QuadDIRECT.qdelta(p)
+        @test QuadDIRECT.qdelta(p.children[i], 3) == 0
+    end
+    p = p.children[1]
+    y0 = p.parent.xvalues[p.parent_cindex]
+    QuadDIRECT.add_children!(p, 3, [-1, 0.2, 1], [q(x0,y0,-1), q(x0,y0,0.2), q(x0,y0,1)], -Inf, Inf)
+    @test QuadDIRECT.qdelta(p.children[1]) == -Inf
+    @test QuadDIRECT.qdelta(p.children[2]) ≈ q(x0,y0,-0.4) - q(x0,y0,0.2)
+    @test QuadDIRECT.qdelta(p.children[3]) ≈ q(x0,y0, 0.6) - q(x0,y0,1)
+    for i = 1:3
+        @test QuadDIRECT.qdelta(p.children[i], 3) == QuadDIRECT.qdelta(p.children[i])
+        @test QuadDIRECT.qdelta(p.children[i], 2) == QuadDIRECT.qdelta(p)
+        @test QuadDIRECT.qdelta(p.children[i], 1) == QuadDIRECT.qdelta(p.parent)
+    end
+
+    # quasinewton tests
+    points = Float64[-11 -6; -10 -6; -9 -6; -10 -7; -10 -5; -11 -10]'
+    values = [canyon(points[:,i]) for i = 1:size(points, 2)]
+    coefs = zeros(6, 6)
+    xref = points[:,1]
+    for col = 1:6
+        QuadDIRECT.setcol!(coefs, col, points[:,col], xref)
+    end
+    B, g, c = QuadDIRECT.full_quadratic_fit(coefs, values)
+    @test B ≈ [20.2 -19.8; -19.8 20.2]
+    @test norm(points[:,1] - B \ g) < 1e-5
 end
 
 @testset "Building minimum edges" begin
