@@ -185,14 +185,15 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
 end
 
 # A dumb O(N) algorithm for building the minimum-edge structures
-function minimum_edges(root::Box{T,N}, x0, lower, upper, minwidth=zeros(eltype(x0), ndims(root))) where {T,N}
+# For large trees, this is the bottleneck
+function minimum_edges(root::Box{T,N}, x0, lower, upper, minwidth=zeros(eltype(x0), ndims(root)); extrapolate::Bool=true) where {T,N}
     mes = [MELink{T,T}(root) for i = 1:N]
     for box in leaves(root)
         fval = value(box)
         for i = 1:N
             bb = boxbounds(find_parent_with_splitdim(box, i), lower[i], upper[i])
             bb[2]-bb[1] < minwidth[i] && continue
-            insert!(mes[i], width(box, i, x0, lower, upper), box=>fval+qdelta(box, i))
+            insert!(mes[i], width(box, i, x0, lower, upper), box=>extrapolate ? fval+qdelta(box, i) : fval)
         end
     end
     return mes
@@ -208,8 +209,8 @@ function trimschedule!(mes::Vector{<:MELink}, box::Box, splitdim, x0, lower, upp
     return mes
 end
 
-function sweep!(root::Box, f, x0, splits, lower, upper; minwidth=zeros(eltype(x0), ndims(root)))
-    mes = minimum_edges(root, x0, lower, upper, minwidth)
+function sweep!(root::Box, f, x0, splits, lower, upper; extrapolate::Bool = true, minwidth=zeros(eltype(x0), ndims(root)))
+    mes = minimum_edges(root, x0, lower, upper, minwidth; extrapolate=extrapolate)
     sweep!(root, mes, f, x0, splits, lower, upper; minwidth=minwidth)
 end
 function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper; minwidth=zeros(eltype(x0), ndims(root)))
@@ -321,9 +322,11 @@ function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, a
     if print_interval < typemax(Int)
         println("Initial minimum ($len evaluations): ", minimum(root))
     end
+    extrapolate = true
     while boxval > fvalue && tol_counter <= ndims(box) && len < maxevals
         lastval = boxval
-        sweep!(root, f, x0, splits, lower, upper; kwargs...)
+        sweep!(root, f, x0, splits, lower, upper; extrapolate=extrapolate, kwargs...)
+        extrapolate = !extrapolate
         box = minimum(root)
         boxval = value(box)
         len = length(leaves(root))
