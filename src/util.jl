@@ -786,7 +786,7 @@ function ensure_distinct(x::T, xref, bb::Tuple{Real,Real}; minfrac = 0.1) where 
     end
     Δxmin = T(minfrac*Δx)
     if abs(x - xref) < Δxmin
-        s = x == xref ? 1 : sign(x-xref)
+        s = x == xref ? (bb[2] - xref > xref - bb[1] ? 1 : -1) : sign(x-xref)
         x = T(xref + Δxmin*s)
     end
     return x

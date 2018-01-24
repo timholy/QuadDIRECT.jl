@@ -66,7 +66,7 @@ minwidth = [1, 1, 0.02]
 root, x0 = analyze(f, splits, lower, upper; maxevals=10, minwidth=minwidth)
 # Iterative refinement with control over convergence. `fvalue=0.02` forces it to keep looking until it finds something good.
 warn("This will take a long time")
-root = analyze!(root, f, x0, splits, lower, upper; maxevals=10000, fvalue=0.02, rtol=0, minwidth=minwidth, print_interval=100)
+root = analyze!(root, f, x0, splits, lower, upper; maxevals=10000, fvalue=0.01, rtol=0, minwidth=minwidth, print_interval=100)
 
 box = minimum(root)
 println("Ground truth: ", x)

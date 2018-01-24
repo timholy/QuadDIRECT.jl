@@ -301,6 +301,12 @@ function quasinewton!(box::Box{T}, mes, coefs, values, f, x0, splitdim, lower, u
             xcur = xleaf[imin]
             xt = ensure_distinct(xtarget[imin], xcur, bb)
             a, b, c = pick3(xcur, xt, bb)
+            if a == b || b == c
+                # The box might be so narrow that there are not enough distinct floating-point
+                # numbers that lie between the bounds.
+                dims_targeted[imin] = true
+                continue
+            end
             split!(leaf, f, xleaf, imin, MVector3{T}(a, b, c), bb..., xleaf[imin], value(leaf))
             childindex = findfirst(equalto(xt), leaf.xvalues)
             leaf = leaf.children[childindex]
