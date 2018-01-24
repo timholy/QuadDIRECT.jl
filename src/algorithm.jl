@@ -257,16 +257,15 @@ function quasinewton!(box::Box{T}, mes, coefs, values, f, x0, splitdim, lower, u
     iter = 0 # the above weren't "real" iterations, so reset
     root = get_root(box)
     # Do a backtracking linesearch, splitting any boxes that we encounter along the way
+    fbox = value(box)
     while iter < itermax
         iter += 1
         xtarget = x + α*Δx
-        # TODO: rewrite this to try f(xtarget), and if it's lower start splitting boxes.
-        # (If not, backtrack without making any boxes. This will break the correspondence btw
-        # function evaluation and leaves. Bummer.)
-        # The problem with the current implementation is that even a great step triggers
-        # backtracking because the coordinate-aligned approximation is too coarse.
+        if f(xtarget) > fbox
+            α /= 2
+            continue
+        end
         leaf = find_leaf_at(root, xtarget)
-        xleaf = position(leaf, x0)
         # If leaf or one of its ancestors has been targeted before from an "external" box,
         # terminate. The only allowed re-targetings are from inside the narrowest box yet
         # targeted. This prevents running many line searches that all point to the same minimum.
@@ -276,54 +275,37 @@ function quasinewton!(box::Box{T}, mes, coefs, values, f, x0, splitdim, lower, u
                 iter == 1 && record_targeted!(mes, leaf, splitdim)
                 return false
             end
-        else
-            dims_targeted = falses(ndims(leaf))
         end
-        leaf.qtargeted = true
         # For consistency with the tree structure, we can change only one coordinate of
-        # xleaf. Pick the one that yields the smallest value as predicted by the
-        # quadratic model.
-        xtest = copy(xleaf)
+        # xleaf per split. Cycle through all coordinates, picking the one at each stage
+        # that yields the smallest value as predicted by the quadratic model among the
+        # not-yet-selected coordinates.
+        dims_targeted = falses(ndims(leaf))
         q(x) = (x'*B*x)/2 + g'*x + c
-        imin, fmin = 0, typemax(T)
-        for i = 1:ndims(leaf)
-            dims_targeted[i] && continue
-            xtest = replacecoordinate!(xtest, i, xtarget[i])
-            qx = q(xtest)
-            if qx < fmin
-                fmin = qx
-                imin = i
+        for j = 1:ndims(leaf)
+            leaf.qtargeted = true
+            xleaf = position(leaf, x0)
+            xtest = copy(xleaf)
+            imin, fmin = 0, typemax(T)
+            for i = 1:ndims(leaf)
+                dims_targeted[i] && continue
+                xtest = replacecoordinate!(xtest, i, xtarget[i])
+                qx = q(xtest)
+                if qx < fmin
+                    fmin = qx
+                    imin = i
+                end
             end
+            bb = boxbounds(leaf, imin, lower, upper)
+            xcur = xleaf[imin]
+            xt = ensure_distinct(xtarget[imin], xcur, bb)
+            a, b, c = pick3(xcur, xt, bb)
+            split!(leaf, f, xleaf, imin, MVector3{T}(a, b, c), bb..., xleaf[imin], value(leaf))
+            childindex = findfirst(equalto(xt), leaf.xvalues)
+            leaf = leaf.children[childindex]
+            dims_targeted[imin] = true
         end
-        bb = boxbounds(leaf, imin, lower, upper)
-        xcur = xleaf[imin]
-        xt = ensure_distinct(xtarget[imin], xcur, bb)
-        a, b, c = pick3(xcur, xt, bb)
-        split!(leaf, f, xleaf, imin, MVector3{T}(a, b, c), bb..., xleaf[imin], value(leaf))
-        # return true
-        # end
-        # # We're going to evaluate f inside leaf. For consistency with the tree structure,
-        # # we need to match the position of the evaluation point in leaf at all but one
-        # # coordinate. First, match the coordinate with the farthest intersection between
-        # # the ray and the coordinate hyperplanes.
-        # bbs = boxbounds(leaf, lower, upper)
-        # texit = pathlength_box_exit(x, Δx, bbs)[1]
-        # @show texit
-        # tmax = min(oftype(texit, 1), texit)
-        # t, intersectdim = pathlength_hyperplane_intersect(x, Δx, xleaf, tmax)
-        # # At t, it matches xleaf[intersectdim]. We need to match N-2 remaining coordinates.
-        # @assert(t > 0 && intersectdim != 0)
-        # @show t intersectdim
-        # xtarget = x + t*Δx
-        # @show x xtarget xleaf
-        # # Pick a 3rd point
-        # bb = bbs[intersectdim]
-        # a, b, c = pick3(xleaf[intersectdim], xtarget[intersectdim], bb)
-        # split!(leaf, f, xleaf, intersectdim, MVector3{T}(a, b, c), bb..., xleaf[intersectdim], value(leaf))
-        if minimum(leaf.fvalues) < value(box) || leaf == box
-            return true
-        end
-        α /= 2
+        return true
     end
     return false
 end
