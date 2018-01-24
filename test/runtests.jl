@@ -250,13 +250,13 @@ end
     box, x0, xstar = QuadDIRECT.init(camel, splits, lower, upper)
     r = QuadDIRECT.get_root(box)
     mes = QuadDIRECT.minimum_edges(r, x0, lower, upper)
-    @test [x.w for x in mes[1]] == [1.0, Inf]
+    @test [x.w for x in mes[1]] == [1.0]
     fs = [x.f for x in mes[1]]
     bxs = [x.l for x in mes[1]]
-    @test length(fs) == 2 && all([fs[i] <= camel(position(bxs[i], x0)) for i = 1:2])
+    @test length(fs) == 1 && all([fs[i] <= camel(position(bxs[i], x0)) for i = 1:1])
     @test [x.w for x in mes[2]] == [0.5, Inf]
-    fs = [x.f for x in mes[1]]
-    bxs = [x.l for x in mes[1]]
+    fs = [x.f for x in mes[2]]
+    bxs = [x.l for x in mes[2]]
     @test length(fs) == 2 && all([fs[i] <= camel(position(bxs[i], x0)) for i = 1:2])
 end
 
@@ -284,10 +284,14 @@ end
     xmin, fmin = minimize(camel, splits, lower, upper)
     @test fmin < -1.02
     @test norm(xmin - [0.0898, -0.7126]) < 0.1 || norm(xmin - [-0.0898, 0.7126]) < 0.1
+    root, x0 = analyze(camel, splits, lower, upper)
+    @test length(leaves(root)) < 500
 
     splits = ([-11,-10,-9], [-7,-6,-5])
     lower, upper = [-Inf, -Inf], [Inf, Inf]
     xmin, fmin = minimize(canyon, splits, lower, upper; atol=1e-3)
-    @test fmin < 0.015
-    @test norm(xmin) < 0.3
+    @test fmin < 1e-10
+    @test norm(xmin) < 1e-5
+    root, x0 = analyze(camel, splits, lower, upper)
+    @test length(leaves(root)) < 300
 end
