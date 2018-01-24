@@ -26,10 +26,9 @@ end
     n = length(xstar)
     root = box = Box{T,n}()
     xtmp = copy(xstar)
-    xcur, fcur = dummyvalue(T), dummyvalue(T)
+    fcur = dummyvalue(T)
     for i = 1:n
-        xtmp = ipcopy!(xtmp, xstar)
-        box = split!(box, f, xtmp, i, xsplits[i], lower[i], upper[i], xcur, fcur)
+        box = split!(box, f, xtmp, i, xsplits[i], lower[i], upper[i], xstar[i], fcur)
         xcur, fcur = box.parent.xvalues[box.parent_cindex], box.parent.fvalues[box.parent_cindex]
         xstar = replacecoordinate!(xstar, i, xcur)
     end
@@ -42,7 +41,7 @@ function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real
     fmin, idxmin = typemax(T), 0
     for l = 1:3
         @assert(isfinite(xsplit[l]))
-        if xsplit[l] == xcur && !isnan(fcur)
+        if xsplit[l] == xcur && !isdummy(fcur)
             ftmp = fcur
         else
             xtmp = replacecoordinate!(xtmp, splitdim, xsplit[l])
@@ -59,6 +58,7 @@ function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real
         idxmin = 2  # prefer the middle in case of ties
     end
     add_children!(box, splitdim, xsplit, fsplit, lower, upper)
+    xtmp = replacecoordinate!(xtmp, splitdim, xsplit[idxmin])
     return box.children[idxmin]
 end
 

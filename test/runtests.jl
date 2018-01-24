@@ -149,6 +149,16 @@ end
         @test p.xvalues[i] == splits[1][i]
         @test p.fvalues[i] == camel([splits[1][i], splits[2][2]]) # perforce the 2nd coordinate is chosen from the middle
     end
+
+    h(x) = sum(abs2, x)/2
+    splits = [[-3,-2,-1] for i = 1:3]
+    upper = fill(Inf, 3)
+    lower = -upper
+    box, x0, xstar = QuadDIRECT.init(h, splits, lower, upper)
+    root = QuadDIRECT.get_root(box)
+    for leaf in leaves(root)
+        @test value(leaf) == h(position(leaf, x0))
+    end
 end
 
 @testset "Traversal" begin
