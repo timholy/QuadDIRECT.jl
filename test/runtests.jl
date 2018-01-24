@@ -233,6 +233,19 @@ end
     B, g, c = QuadDIRECT.full_quadratic_fit(coefs, values)
     @test B ≈ [20.2 -19.8; -19.8 20.2]
     @test norm(points[:,1] - B \ g) < 1e-5
+
+    splits = ([-11,-10,-9], [-7,-6,-5])
+    lower, upper = [-Inf, -Inf], [Inf, Inf]
+    box, x0, xstar = QuadDIRECT.init(canyon, splits, lower, upper)
+    root = QuadDIRECT.get_root(box)
+    for leaf in leaves(root)
+        pts, vals = QuadDIRECT.gather_points(leaf, x0)
+        @test length(vals) == 5
+        @test length(pts) == 10
+        for i = 1:5
+            @test vals[i] == canyon(pts[2*i-1:2*i])
+        end
+    end
 end
 
 @testset "Building minimum edges" begin
@@ -265,13 +278,13 @@ end
     lower, upper = [-2.75, -1.9], [3.0, 2.0]
     box, x0, xstar = QuadDIRECT.init(camel, splits, lower, upper)
     r1 = QuadDIRECT.get_root(box)
-    QuadDIRECT.sweep!(r1, camel, x0, splits, lower, upper)
+    QuadDIRECT.sweep!(r1, QuadDIRECT.CountedFunction(camel), x0, splits, lower, upper)
 
     splits = ([-2, 0, 2], [-1, 0, 1])
     lower, upper = [-Inf, -Inf], [Inf, Inf]
     box, x0, xstar = QuadDIRECT.init(camel, splits, lower, upper)
     r2 = QuadDIRECT.get_root(box)
-    QuadDIRECT.sweep!(r2, camel, x0, splits, lower, upper)
+    QuadDIRECT.sweep!(r2, QuadDIRECT.CountedFunction(camel), x0, splits, lower, upper)
 
     mn1, mx1 = extrema(r1)
     mn2, mx2 = extrema(r2)

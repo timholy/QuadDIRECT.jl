@@ -281,69 +281,57 @@ function npoints_exceeds(box, nthresh)
         hassplit[box.splitdim] = true
         nnz = sum(hassplit)
         if 2*n < (nnz+1)*(nnz+2)
-            n += 1
-        end
-        if 2*n < (nnz+1)*(nnz+2)
-            n += 1
+            n += 2
         end
     end
     return n >= nthresh
 end
 
 """
-    coefs, points, values, success = gather_independent_points(box, nparams)
+    points, values = gather_points!(points, values, box, x0)
 """
-function gather_independent_points(box::Box{T,N}, x0, nparams) where {T,N}
-    points = Matrix{T}(uninitialized, N, nparams)
-    coefs = similar(points, (nparams, nparams))
-    values = Vector{T}(uninitialized, nparams)
-    xbox = position(box, x0)
-    col = 1
-    points[:,col] .= xbox
-    values[col] = value(box)
-    setcol!(coefs, col, xbox, xbox)
-    hassplit = fill(false, ndims(box))
-    while !isroot(box) && col < nparams
-        cindex = box.parent_cindex
+function gather_points!(points::AbstractVector, values::AbstractVector, box::Box{T,N}, x0) where {T,N}
+    empty!(points)
+    empty!(values)
+    nsplits = zeros(Int, N)
+    ntarget = ceil(Int, (((N+1)*(N+2))÷2)/N) + 1
+    isroot(box) && isleaf(box) && return points, values
+    add_child_boxes!(points, values, nsplits, box, x0, ntarget)
+    while !all(nsplits .>= ntarget) && !isroot(box)
+        icur = box.parent_cindex
         box = box.parent
-        hassplit[box.splitdim] = true
-        nnz = sum(hassplit)
-        if col >= (nnz+1)*(nnz+2)÷2
-            continue
-        end
-        xtmp = position(box, x0)
-        xp, fp = box.xvalues, box.fvalues
         j = 1
-        if j == cindex
-            j += 1
-        end
-        xtmp = replacecoordinate!(xtmp, box.splitdim, xp[j])
-        setcol!(coefs, col+1, xtmp, xbox)
-        coefs_so_far = view(coefs, :, 1:col)
-        coefs_new = view(coefs, :, col+1)
-        c = coefs_so_far \ coefs_new
-        if norm(coefs_so_far*c - coefs_new) > 1e-8
-            points[:,col+=1] = xtmp
-            values[col] = fp[j]
-        end
-        if col >= (nnz+1)*(nnz+2)÷2
-            continue
-        end
+        if j == icur j += 1 end
+        add_child_boxes!(points, values, nsplits, box.children[j], x0, ntarget)
         j += 1
-        if j == cindex
-            j += 1
-        end
-        xtmp = replacecoordinate!(xtmp, box.splitdim, xp[j])
-        setcol!(coefs, col+1, xtmp, xbox)
-        coefs_so_far = view(coefs, :, 1:col)
-        coefs_new = view(coefs, :, col+1)
-        c = coefs_so_far \ coefs_new
-        if norm(coefs_so_far*c - coefs_new) > 1e-8
-            points[:,col+=1] = xtmp
-            values[col] = fp[j]
-        end
+        if j == icur j += 1 end
+        add_child_boxes!(points, values, nsplits, box.children[j], x0, ntarget)
     end
-    return coefs, values, points, col == nparams
+    return points, values
+end
+gather_points(box::Box{T,N}, x0) where {T,N} = gather_points!(T[], T[], box, x0)
+
+function add_child_boxes!(points, values, nsplits, box, x0, ntarget)
+    all(nsplits .>= ntarget) && return nothing
+    if !isleaf(box)
+        # Make sure we add the child that doesn't "move" first, so that the first
+        # entry in points is the base point
+        xbox = position(box, x0)
+        xcur = xbox[box.splitdim]
+        icur = findfirst(equalto(xcur), box.xvalues)
+        add_child_boxes!(points, values, nsplits, box.children[icur], x0, ntarget)
+        j = 1
+        if j == icur j += 1 end
+        add_child_boxes!(points, values, nsplits, box.children[j], x0, ntarget)
+        j += 1
+        if j == icur j += 1 end
+        add_child_boxes!(points, values, nsplits, box.children[j], x0, ntarget)
+    else
+        append!(points, position(box, x0))
+        push!(values, value(box))
+        nsplits[box.parent.splitdim] += 1
+    end
+    return nothing
 end
 
 function count_n_collinear_along_dim!(nc, points, col, xtmp)
@@ -740,7 +728,7 @@ replacecoordinate!(x, i::Integer, val) = (x[i] = val; x)
 
 replacecoordinate!(x::SVector{N,T}, i::Integer, val) where {N,T} =
     SVector{N,T}(_rpc(Tuple(x), i-1, T(val)))
-@inline _rpc(t, i, val) = (ifelse(i == 0, val, t[1]), _rpc(tail(t), i-1, val)...)
+@inline _rpc(t, i, val) = (ifelse(i == 0, val, t[1]), _rpc(Base.tail(t), i-1, val)...)
 _rps(::Tuple{}, i, val) = ()
 
 ipcopy!(dest, src) = copy!(dest, src)

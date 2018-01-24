@@ -66,7 +66,7 @@ end
 # box suggests that one of its neighbors might be even lower,
 # recursively calls itself to split that box, too.
 # Returns `box, used_quasinewton`.
-function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, xsplitdefaults, lower, upper, minwidth, visited::Set) where T
+function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, xtmp, splitdim, xsplitdefaults, lower, upper, minwidth, visited::Set) where T
     box ∈ visited && error("already visited box")
     if !isleaf(box)
         # This box already got split along a different dimension
@@ -103,12 +103,10 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f, x0, xtmp, splitdim, x
     bb[2]-bb[1] >= minwidth[splitdim] || return (box, false)
     N = ndims(box)
     nqn = ((N+1)*(N+2))÷2  # number of points needed for quasi-Newton approach
-    if npoints_exceeds(box, nqn)
-        coefs, values, positions, success = gather_independent_points(box, x0, nqn)
-        if success
-            success = quasinewton!(box, mes, coefs, values, f, x0, splitdim, lower, upper)
-            success && return (box, true)
-        end
+    if f.evals > nqn
+        points, values = gather_points(box, x0)
+        success = quasinewton!(box, mes, reshape(points, N, length(values)), values, f, x0, splitdim, lower, upper)
+        return box, success
     end
     xp, fp = p.parent.xvalues, p.parent.fvalues
     Δx = max(xp[2]-xp[1], xp[3]-xp[2])  # a measure of the "pragmatic" box scale even when the box is infinite
@@ -204,7 +202,17 @@ function full_quadratic_fit(coefs::AbstractMatrix{T}, values::AbstractVector{T})
     @assert((N+1)*(N+2) == 2*size(coefs, 1))
     B = Matrix{T}(uninitialized, N, N)
     g = Vector{T}(uninitialized, N)
-    params = svdfact(coefs') \ values
+    F = svdfact(coefs')
+    S = F[:S]
+    Sthresh = eps(T)^(2/3) * S[1]
+    nzeros = sz - length(S)
+    for i = 1:length(S)
+        if S[i] < Sthresh
+            S[i] = 0
+            nzeros += 1
+        end
+    end
+    params = F \ values
     k = 0
     for j = 1:N
         B[j, j] = params[k+=1]
@@ -216,7 +224,17 @@ function full_quadratic_fit(coefs::AbstractMatrix{T}, values::AbstractVector{T})
         g[i] = params[k+=1]
     end
     c = params[end]
-    return B, g, c
+    return B, g, c, nzeros
+end
+
+function quadratic_coefficients(points::AbstractMatrix{T}) where T
+    N, npoints = size(points)
+    coefs = Array{T}(uninitialized, ((N+1)*(N+2))÷2, npoints)
+    xref = points[:,1]
+    for col = 1:npoints
+        setcol!(coefs, col, points[:,col], xref)
+    end
+    coefs
 end
 
 function setcol!(coefs, col, x, xref)
@@ -243,8 +261,9 @@ function setcol!(coefs, col, x, xref)
     coefs
 end
 
-function quasinewton!(box::Box{T}, mes, coefs, values, f, x0, splitdim, lower, upper, itermax = 20) where T
-    B, g, c = full_quadratic_fit(coefs, values)
+function quasinewton!(box::Box{T}, mes, points, values, f, x0, splitdim, lower, upper, itermax = 20) where T
+    coefs = quadratic_coefficients(points)
+    B, g, c, nzeros = full_quadratic_fit(coefs, values)
     cB = cholfact(Positive, B)
     Δx = -(cB \ g)
     α = T(1.0)
@@ -283,7 +302,7 @@ function quasinewton!(box::Box{T}, mes, coefs, values, f, x0, splitdim, lower, u
         # not-yet-selected coordinates.
         dims_targeted = falses(ndims(leaf))
         q(x) = (x'*B*x)/2 + g'*x + c
-        for j = 1:ndims(leaf)
+        for j = 1:max(1, ndims(leaf) - nzeros)
             leaf.qtargeted = true
             xleaf = position(leaf, x0)
             xtest = copy(xleaf)
@@ -312,7 +331,7 @@ function quasinewton!(box::Box{T}, mes, coefs, values, f, x0, splitdim, lower, u
             leaf = leaf.children[childindex]
             dims_targeted[imin] = true
         end
-        return true
+        return nzeros == 0
     end
     return false
 end
