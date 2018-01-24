@@ -114,3 +114,17 @@ isleaf(box::Box) = box.splitdim == 0
 Base.parent(box::Box) = box.parent
 Base.ndims(box::Box{T,N}) where {T,N} = N
 Base.iteratorsize(::Type{<:Box}) = Base.SizeUnknown()
+
+# A function that keeps track of the number of evaluations
+mutable struct CountedFunction{F} <: Function
+    f::F
+    evals::Int
+
+    CountedFunction{F}(f) where F = new{F}(f, 0)
+end
+CountedFunction(f::Function) = CountedFunction{typeof(f)}(f)
+
+function (f::CountedFunction{F})(x::AbstractVector) where F
+    f.evals += 1
+    return f.f(x)
+end

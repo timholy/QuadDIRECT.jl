@@ -456,12 +456,13 @@ end
 Further refinement of `root`. See [`analyze`](@ref) for details.
 """
 function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...)
+    fc = CountedFunction(f)
     box = minimum(root)
     boxval = value(box)
     lastval = typemax(boxval)
     tol_counter = 0
     lastprint = 0
-    len = lenold = length(leaves(root))
+    baseline_evals = len = lenold = length(leaves(root))
     if print_interval < typemax(Int)
         println("Initial minimum ($len evaluations): ", minimum(root))
     end
@@ -471,12 +472,12 @@ function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, a
     used_quasinewton = false
     while boxval > fvalue && (tol_counter <= ndims(box) || !used_quasinewton) && len < maxevals
         lastval = boxval
-        _, qn = sweep!(root, f, x0, splits, lower, upper; extrapolate=extrapolate, kwargs...)
+        _, qn = sweep!(root, fc, x0, splits, lower, upper; extrapolate=extrapolate, kwargs...)
         used_quasinewton |= qn
         extrapolate = !extrapolate
         box = minimum(root)
         boxval = value(box)
-        len = length(leaves(root))
+        len = baseline_evals + fc.evals
         len == lenold && break  # couldn't split any boxes
         lenold = len
         if len-lastprint > print_interval
