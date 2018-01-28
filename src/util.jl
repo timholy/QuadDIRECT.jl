@@ -646,6 +646,77 @@ function Base.extrema(root::Box)
     minv, maxv
 end
 
+## Utilities for experimenting with topology of the tree
+function splitprint(io::IO, box::Box)
+    if isleaf(box)
+        print(io, 'l')
+    else
+        print(io, box.splitdim, '(')
+        splitprint(io, box.children[1])
+        print(io, ", ")
+        splitprint(io, box.children[2])
+        print(io, ", ")
+        splitprint(io, box.children[3])
+        print(io, ')')
+    end
+end
+splitprint(box::Box) = splitprint(STDOUT, box)
+
+function splitprint_red(io::IO, box::Box, thisbox::Box)
+    if isleaf(box)
+        box == thisbox ? print_with_color(:light_red, io, 'l') : print(io, 'l')
+    else
+        box == thisbox ? print_with_color(:light_red, io, box.splitdim) : print(io, box.splitdim)
+        print(io, '(')
+        splitprint_red(io, box.children[1], thisbox)
+        print(io, ", ")
+        splitprint_red(io, box.children[2], thisbox)
+        print(io, ", ")
+        splitprint_red(io, box.children[3], thisbox)
+        print(io, ')')
+    end
+end
+splitprint_red(box::Box, thisbox::Box) = splitprint_red(STDOUT, box, thisbox)
+
+function Base.parse(::Type{B}, str::AbstractString) where B<:Box
+    b = B()
+    splitbox!(b, str)
+end
+
+# splitbox! uses integer-valued positions and sets all function values to 0
+function splitbox!(box::Box{T,N}, dim) where {T,N}
+    x = position(box, zeros(N))
+    xd = x[dim]
+    add_children!(box, dim, [xd,xd+1,xd+2], zeros(3), -Inf, Inf)
+    box
+end
+
+function splitbox!(box::Box, str::AbstractString)
+    str == "l" && return
+    m = match(r"([0-9]*)\((.*)\)", str)
+    dim = parse(Int, m.captures[1])
+    dimstr = m.captures[2]
+    splitbox!(box, dim)
+    commapos = [0,0]
+    commaidx = 0
+    open = 0
+    i = start(dimstr)
+    while !done(dimstr, i)
+        c, i = next(dimstr, i)
+        if c == '('
+            open += 1
+        elseif c == ')'
+            open -= 1
+        elseif c == ',' && open == 0
+            commapos[commaidx+=1] = prevind(dimstr, i)
+        end
+    end
+    splitbox!(box.children[1], strip(dimstr[1:prevind(dimstr, commapos[1])]))
+    splitbox!(box.children[2], strip(dimstr[nextind(dimstr, commapos[1]):prevind(dimstr, commapos[2])]))
+    splitbox!(box.children[3], strip(dimstr[nextind(dimstr, commapos[2]):end]))
+    return box
+end
+
 ## Tree traversal
 function get_root(box::Box)
     while !isroot(box)

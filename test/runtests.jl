@@ -103,6 +103,31 @@ function canyon(x)
     return 0.1*(x1+x2)^2 + 10*(x1-x2)^2
 end
 
+@testset "Tree topology and parsing" begin
+    io = IOBuffer()
+    for (str, dim) in (("1(l, l, l)", 1),
+                       ("2(l, l, l)", 2))
+        box = parse(Box{Float64,3}, str)
+        @test QuadDIRECT.isroot(box)
+        @test !QuadDIRECT.isleaf(box)
+        @test box.splitdim == dim
+        for i = 1:3
+            @test !QuadDIRECT.isroot(box.children[i])
+            @test QuadDIRECT.isleaf(box.children[i])
+        end
+        splitprint(io, box)
+        @test String(take!(io)) == str
+    end
+    str = "2(l, 1(l, 3(l, l, l), l), l)"
+    box = parse(Box{Float64,3}, str)
+    splitprint(io, box)
+    @test String(take!(io)) == str
+    str = "2(l, 1(l, 3(l, l, l), 1(l, l, l)), l)"
+    box = parse(Box{Float64,3}, str)
+    splitprint(io, box)
+    @test String(take!(io)) == str
+end
+
 @testset "Initialization" begin
     splits = ([-2, 0, 2], [-1, 0, 1])
     box, x0, xstar = QuadDIRECT.init(camel, splits, [-Inf, -Inf], [Inf, Inf])
