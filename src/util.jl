@@ -164,7 +164,7 @@ function Base.show(io::IO, mel::MELink)
 end
 
 
-## Box utilities
+### Box utilities
 function Base.show(io::IO, box::Box)
     x = fill(NaN, ndims(box))
     position!(x, box)
@@ -179,6 +179,16 @@ end
 value_safe(box::Box{T}) where T = isroot(box) ? typemax(T) : value(box)
 
 Base.isless(box1::Box, box2::Box) = isless(value_safe(box1), value_safe(box2))
+
+function pick_other(xvalues, fvalues, idx)
+    j = 1
+    if j == idx j += 1 end
+    xf1 = xvalues[j] => fvalues[j]
+    j += 1
+    if j == idx j += 1 end
+    xf2 = xvalues[j] => fvalues[j]
+    return xf1, xf2
+end
 
 function treeprint(io::IO, f::Function, root::Box)
     show(io, root)
@@ -264,94 +274,6 @@ function find_smallest_child_leaf(box::Box)
         box = box.children[idx]
     end
     box
-end
-
-"""
-    npoints_exceeds(box, nthresh)
-
-Return true if the number of function evaluations in `box` and its ancestors exceeds `nthresh`.
-This is a quick (and not very accurate) assessment of whether `gather_independent_points`
-is likely to succeed.
-"""
-function npoints_exceeds(box, nthresh)
-    n = 1
-    hassplit = fill(false, ndims(box))
-    while !isroot(box) && n < nthresh
-        box = parent(box)
-        hassplit[box.splitdim] = true
-        nnz = sum(hassplit)
-        if 2*n < (nnz+1)*(nnz+2)
-            n += 2
-        end
-    end
-    return n >= nthresh
-end
-
-"""
-    points, values = gather_points!(points, values, box, x0)
-"""
-function gather_points!(points::AbstractVector, values::AbstractVector, box::Box{T,N}, x0) where {T,N}
-    empty!(points)
-    empty!(values)
-    nsplits = zeros(Int, N)
-    ntarget = ceil(Int, (((N+1)*(N+2))÷2)/N) + 1
-    isroot(box) && isleaf(box) && return points, values
-    add_child_boxes!(points, values, nsplits, box, x0, ntarget)
-    while !all(nsplits .>= ntarget) && !isroot(box)
-        icur = box.parent_cindex
-        box = box.parent
-        j = 1
-        if j == icur j += 1 end
-        add_child_boxes!(points, values, nsplits, box.children[j], x0, ntarget)
-        j += 1
-        if j == icur j += 1 end
-        add_child_boxes!(points, values, nsplits, box.children[j], x0, ntarget)
-    end
-    return points, values
-end
-gather_points(box::Box{T,N}, x0) where {T,N} = gather_points!(T[], T[], box, x0)
-
-function add_child_boxes!(points, values, nsplits, box, x0, ntarget)
-    all(nsplits .>= ntarget) && return nothing
-    if !isleaf(box)
-        # Make sure we add the child that doesn't "move" first, so that the first
-        # entry in points is the base point
-        xbox = position(box, x0)
-        xcur = xbox[box.splitdim]
-        icur = findfirst(equalto(xcur), box.xvalues)
-        add_child_boxes!(points, values, nsplits, box.children[icur], x0, ntarget)
-        j = 1
-        if j == icur j += 1 end
-        add_child_boxes!(points, values, nsplits, box.children[j], x0, ntarget)
-        j += 1
-        if j == icur j += 1 end
-        add_child_boxes!(points, values, nsplits, box.children[j], x0, ntarget)
-    else
-        append!(points, position(box, x0))
-        push!(values, value(box))
-        nsplits[box.parent.splitdim] += 1
-    end
-    return nothing
-end
-
-function count_n_collinear_along_dim!(nc, points, col, xtmp)
-    N = length(nc)
-    fill!(nc, 0)
-    for j = 1:col
-        nsame = 0
-        diffindex = 0
-        for i = 1:N
-            if points[i,j] == xtmp[i]
-                nsame += 1
-            else
-                diffindex = i
-            end
-        end
-        if nsame == N-1
-            nc[diffindex] += 1
-        end
-    end
-    return nc
 end
 
 """

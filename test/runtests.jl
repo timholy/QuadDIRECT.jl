@@ -248,28 +248,22 @@ end
     end
 
     # quasinewton tests
-    points = Float64[-11 -6; -10 -6; -9 -6; -10 -7; -10 -5; -11 -10]'
-    values = [canyon(points[:,i]) for i = 1:size(points, 2)]
-    coefs = zeros(6, 6)
-    xref = points[:,1]
-    for col = 1:6
-        QuadDIRECT.setcol!(coefs, col, points[:,col], xref)
-    end
-    B, g, c = QuadDIRECT.full_quadratic_fit(coefs, values)
-    @test B ≈ [20.2 -19.8; -19.8 20.2]
-    @test norm(points[:,1] - B \ g) < 1e-5
-
     splits = ([-11,-10,-9], [-7,-6,-5])
     lower, upper = [-Inf, -Inf], [Inf, Inf]
     box, x0, xstar = QuadDIRECT.init(canyon, splits, lower, upper)
+    Q, xbase, c = QuadDIRECT.build_quadratic_model(box, x0)
+    @test xbase == xstar
+    @test c == canyon(xstar)
+    @test_throws Base.LinAlg.SingularException QuadDIRECT.solve(Q)
+    y = xstar[2]
+    QuadDIRECT.add_children!(box, 1, [xstar[1], -8, -7],
+                             [canyon([xstar[1],y]), canyon([-8,y]), canyon([-7,y])], -Inf, Inf)
     root = QuadDIRECT.get_root(box)
     for leaf in leaves(root)
-        pts, vals = QuadDIRECT.gather_points(leaf, x0)
-        @test length(vals) == 5
-        @test length(pts) == 10
-        for i = 1:5
-            @test vals[i] == canyon(pts[2*i-1:2*i])
-        end
+        Q, xbase, c = QuadDIRECT.build_quadratic_model(leaf, x0)
+        g, B = QuadDIRECT.solve(Q)
+        @test B ≈ [20.2 -19.8; -19.8 20.2]
+        @test (B \ g) ≈ xbase
     end
 end
 

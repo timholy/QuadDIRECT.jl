@@ -128,3 +128,24 @@ function (f::CountedFunction{F})(x::AbstractVector) where F
     f.evals += 1
     return f.f(x)
 end
+
+# Quadratic-model Incremental Gaussian Elimination
+struct QmIGE{T,N}
+    coefs::PermutedDimsArray{T,2,(2, 1),(2, 1),Array{T,2}} # to make row-major operations fast
+    rhs::Vector{T}
+    dimpiv::Vector{Int}   # order in which dimensions were added
+    rowzero::Vector{Bool} # true if a row in coefs is all-zeros
+    ndims::typeof(Ref(1)) # number of dimensions added so far
+    nzrows::typeof(Ref(1))
+    rowtmp::Vector{T}
+end
+
+function QmIGE{T,N}() where {T,N}
+    m = ((N+1)*(N+2))÷2 - 1  # the constant is handled separately
+    coefs = PermutedDimsArray(zeros(T, m, m), (2, 1))
+    rhs = zeros(T, m)
+    rowtmp = zeros(T, m)
+    dimpiv = zeros(Int, N)
+    rowzero = fill(true, m)
+    QmIGE{T,N}(coefs, rhs, dimpiv, rowzero, Ref(0), Ref(0), rowtmp)
+end

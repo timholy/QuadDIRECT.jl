@@ -103,10 +103,13 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
     bb[2]-bb[1] >= minwidth[splitdim] || return (box, false)
     N = ndims(box)
     nqn = ((N+1)*(N+2))÷2  # number of points needed for quasi-Newton approach
-    if f.evals > nqn
-        points, values = gather_points(box, x0)
-        success = quasinewton!(box, mes, reshape(points, N, length(values)), values, f, x0, splitdim, lower, upper)
-        return box, success
+    if f.evals > 3*nqn     # make sure there is some excess
+        Q, xbase, c = build_quadratic_model(box, x0)
+        if Q.nzrows[] == size(Q.coefs, 1)
+            g, B = solve(Q)
+            success = quasinewton!(box, mes, B, g, c, f, x0, splitdim, lower, upper)
+            return box, success
+        end
     end
     xp, fp = p.parent.xvalues, p.parent.fvalues
     Δx = max(xp[2]-xp[1], xp[3]-xp[2])  # a measure of the "pragmatic" box scale even when the box is infinite
@@ -192,78 +195,164 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
     return box, false
 end
 
-# Use regression to compute the best-fit quadratic model (with a dense Hessian)
-function full_quadratic_fit(coefs::AbstractMatrix{T}, values::AbstractVector{T}) where T
-    sz = size(coefs, 1)
-    N = ceil(Int, sqrt(2*sz))
-    while (N+1)*(N+2)÷2 > sz
-        N -= 1
-    end
-    @assert((N+1)*(N+2) == 2*size(coefs, 1))
-    B = Matrix{T}(uninitialized, N, N)
-    g = Vector{T}(uninitialized, N)
-    F = svdfact(coefs')
-    S = F[:S]
-    Sthresh = eps(T)^(2/3) * S[1]
-    nzeros = sz - length(S)
-    for i = 1:length(S)
-        if S[i] < Sthresh
-            S[i] = 0
-            nzeros += 1
+## Use regression to compute the best-fit quadratic model (with a dense Hessian)
+
+# This implements the logic of "transposed" Gaussian elimination
+# when adding a new point. We do it in transposed form because incoming
+# points tend to build a lower-triangular matrix: the tree structure
+# adds dimensions one at a time, so Δx will be all-zeros for trailing dimensions
+# (once permuted into the order specified by dimpiv).
+function Base.insert!(Q::QmIGE, Δx, Δf, splitdim::Integer)
+    coefs, rhs, rowtmp = Q.coefs, Q.rhs, Q.rowtmp
+    dimpiv, rowzero, ndims_old = Q.dimpiv, Q.rowzero, Q.ndims[]
+    ndims = setrow!(rowtmp, dimpiv, Δx, ndims_old, splitdim)
+    if ndims > ndims_old
+        # Append to coefs. We always insert at the end of the
+        # block corresponding to splitdim, so that we're performing
+        # elimination on incoming points. That gives us a chance to
+        # test for degeneracy before inserting them.
+        i = ndims + (ndims*(ndims+1))÷2 # #gcoefs + #Bcoefs so far
+        while i > 0 && rowtmp[i] == 0
+            i -= 1
         end
+        i == 0 && return Q
+        for j = 1:i
+            coefs[i,j] = rowtmp[j]
+        end
+        rowzero[i] = false
+        rhs[i] = Δf
+        Q.ndims[] = ndims
+        Q.nzrows[] += 1
+        return Q
     end
-    params = F \ values
+    # We've seen all the nonzero dimensions in Δx previously
+    # Use elimination to determine whether it provides novel information
+    lastnz = ndims
+    while lastnz > 1 && Δx[dimpiv[lastnz]] == 0
+        lastnz -= 1
+    end
+    i = lastnz + (lastnz*(lastnz+1))÷2
+    while i > 0
+        if rowtmp[i] == 0
+            i -= 1
+            continue
+        end
+        rowzero[i] && break
+        if abs(rowtmp[i]) > abs(coefs[i,i])
+            # Swap (for numeric stability)
+            for j = 1:i
+                rowtmp[j], coefs[i,j] = coefs[i,j], rowtmp[j]
+            end
+            Δf, rhs[i] = rhs[i], Δf
+        end
+        c = rowtmp[i]/coefs[i,i]
+        for j = 1:i-1
+            sub = c * coefs[i,j]
+            rowtmp[j] = rowtmp[j] ≈ sub ? zero(sub) : rowtmp[j] - sub
+        end
+        rowtmp[i] = 0  # in case of roundoff error
+        Δf -= c*rhs[i]
+        i -= 1
+    end
+    if i == 0
+        return Q
+    end
+    for j = 1:i
+        coefs[i,j] = rowtmp[j]
+    end
+    rowzero[i] = false
+    rhs[i] = Δf
+    Q.nzrows[] += 1
+    return Q
+end
+
+function setrow!(rowtmp, dimpiv, Δx, ndims, splitdim)
+    fill!(rowtmp, 0)
     k = 0
-    for j = 1:N
-        B[j, j] = params[k+=1]
+    have_splitdim = false
+    for j = 1:ndims
+        d = dimpiv[j]
+        have_splitdim |= splitdim == d
+        # The g coefs are linear in x, the B coefs quadratic
+        # The implied storage order here matches `solve` below
+        rowtmp[k+=1] = Δxd = Δx[d]  # g coef
         for i = 1:j-1
-            B[i, j] = B[j, i] = params[k+=1]
+            rowtmp[k+=1] = Δxd * Δx[dimpiv[i]] # B[d,dimpiv[i]] coefficient
+        end
+        rowtmp[k+=1] = (Δxd * Δxd)/2 # B[d,d] coefficient
+    end
+    if !have_splitdim
+        # We've not seen this dimension previously, so make it the
+        # next one in dimpiv.
+        ndims += 1
+        dimpiv[ndims] = splitdim
+        rowtmp[k+=1] = Δxd = Δx[splitdim]
+        for i = 1:ndims-1
+            rowtmp[k+=1] = Δxd * Δx[dimpiv[i]]
+        end
+        rowtmp[k+=1] = (Δxd * Δxd)/2
+    end
+    return ndims
+end
+
+function solve(Q::QmIGE{T,N}) where {T,N}
+    gB = LowerTriangular(Q.coefs) \ Q.rhs
+    g, B = Vector{T}(uninitialized, N), Matrix{T}(uninitialized, N, N)
+    k = 0
+    dimpiv = Q.dimpiv
+    for i = 1:N
+        di = dimpiv[i]
+        g[di] = gB[k+=1]
+        for j = 1:i
+            dj = dimpiv[j]
+            B[di,dj] = B[dj,di] = gB[k+=1]
         end
     end
-    for i = 1:N
-        g[i] = params[k+=1]
-    end
-    c = params[end]
-    return B, g, c, nzeros
+    return g, B
 end
 
-function quadratic_coefficients(points::AbstractMatrix{T}) where T
-    N, npoints = size(points)
-    coefs = Array{T}(uninitialized, ((N+1)*(N+2))÷2, npoints)
-    xref = points[:,1]
-    for col = 1:npoints
-        setcol!(coefs, col, points[:,col], xref)
-    end
-    coefs
-end
-
-function setcol!(coefs, col, x, xref)
-    N = length(x)
-    nparams = ((N+1)*(N+2))÷2
-    k = (col - 1)*nparams
-    if length(coefs) < k+nparams
-        resize!(coefs, k+nparams)
-    end
-    # Coefficients of the Hessian
-    for j = 1:N
-        dxj = x[j] - xref[j]
-        coefs[k+=1] = 0.5*dxj*dxj
-        for i = 1:j-1
-            coefs[k+=1] = (x[i]-xref[i])*dxj
+function build_quadratic_model(box::Box{T,N}, x0) where {T,N}
+    Q = QmIGE{T,N}()
+    c = value(box)
+    xbase = position(box, x0)
+    if !isleaf(box)
+        for i = 1:3
+            descend!(Q, box.children[i], x0, xbase, c)
         end
     end
-    # Coefficients of the gradient
-    for i = 1:N
-        coefs[k+=1] = x[i]-xref[i]
+    while Q.nzrows[] < length(Q.rhs) && !isroot(box)
+        cindex = box.parent_cindex
+        box = box.parent
+        j = 1
+        if j == cindex j+=1 end
+        descend!(Q, box.children[j], x0, xbase, c)
+        j += 1
+        if j == cindex j+=1 end
+        descend!(Q, box.children[j], x0, xbase, c)
     end
-    # Coefficient of the constant
-    coefs[k+=1] = 1
-    coefs
+    return Q, xbase, c
 end
 
-function quasinewton!(box::Box{T}, mes, points, values, f, x0, splitdim, lower, upper, itermax = 20) where T
-    coefs = quadratic_coefficients(points)
-    B, g, c, nzeros = full_quadratic_fit(coefs, values)
+function descend!(Q, box, x0, xbase, c, skip=false)
+    Q.nzrows[] == length(Q.rhs) && return Q
+    Δx = position(box, x0)
+    thisx = isleaf(box) ? zero(eltype(Δx)) : Δx[box.splitdim]
+    if !skip
+        for i = 1:length(Δx)
+            Δx[i] -= xbase[i]
+        end
+        insert!(Q, Δx, value(box)-c, box.parent.splitdim)
+    end
+    if !isleaf(box)
+        iskip = findfirst(equalto(thisx), box.xvalues)
+        for i = 1:3
+            descend!(Q, box.children[i], x0, xbase, c, i==iskip)
+        end
+    end
+    return Q
+end
+
+function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, itermax = 20) where T
     cB = cholfact(Positive, B)
     Δx = -(cB \ g)
     α = T(1.0)
@@ -302,7 +391,7 @@ function quasinewton!(box::Box{T}, mes, points, values, f, x0, splitdim, lower, 
         # not-yet-selected coordinates.
         dims_targeted = falses(ndims(leaf))
         q(x) = (x'*B*x)/2 + g'*x + c
-        for j = 1:max(1, ndims(leaf) - nzeros)
+        for j = 1:ndims(leaf)
             leaf.qtargeted = true
             xleaf = position(leaf, x0)
             xtest = copy(xleaf)
@@ -331,7 +420,7 @@ function quasinewton!(box::Box{T}, mes, points, values, f, x0, splitdim, lower, 
             leaf = leaf.children[childindex]
             dims_targeted[imin] = true
         end
-        return nzeros == 0
+        return true
     end
     return false
 end
@@ -471,7 +560,7 @@ See also [`minimize`](@ref).
 function analyze(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...)
     box, x0 = init(f, splits, lower, upper)
     root = get_root(box)
-    analyze!(root, f, x0, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals, kwargs...)
+    analyze!(root, f, x0, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals, print_interval=print_interval, kwargs...)
     return root, x0
 end
 
