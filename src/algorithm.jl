@@ -476,11 +476,11 @@ function trimschedule!(mes::Vector{<:MELink}, box::Box, splitdim, x0, lower, upp
     return mes
 end
 
-function sweep!(root::Box, f, x0, splits, lower, upper; extrapolate::Bool = true, fvalue=-Inf, minwidth=zeros(eltype(x0), ndims(root)))
+function sweep!(root::Box, f, x0, splits, lower, upper; extrapolate::Bool = true, fvalue=-Inf, nquasinewton=3*qnthresh(ndims(root)), minwidth=zeros(eltype(x0), ndims(root)))
     mes = minimum_edges(root, x0, lower, upper, minwidth; extrapolate=extrapolate)
-    sweep!(root, mes, f, x0, splits, lower, upper; fvalue=fvalue, minwidth=minwidth)
+    sweep!(root, mes, f, x0, splits, lower, upper; fvalue=fvalue, nquasinewton=nquasinewton, minwidth=minwidth)
 end
-function sweep!(root::Box{T}, mes::Vector{<:MELink}, f, x0, splits, lower, upper; fvalue=-Inf, minwidth=zeros(eltype(x0), ndims(root))) where T
+function sweep!(root::Box{T}, mes::Vector{<:MELink}, f, x0, splits, lower, upper; fvalue=-Inf, nquasinewton=3*qnthresh(ndims(root)), minwidth=zeros(eltype(x0), ndims(root))) where T
     xtmp = similar(x0)
     flag = similar(x0, Bool)
     nsplits = similar(x0, Int)
@@ -488,7 +488,7 @@ function sweep!(root::Box{T}, mes::Vector{<:MELink}, f, x0, splits, lower, upper
     nprocessed = 0
     used_quasinewton = false
     N = ndims(root)
-    qmodel_thresh[] = 3*((N+1)*(N+2))÷2  # number of points needed for quasi-Newton approach
+    qmodel_thresh[] = nquasinewton  # number of points needed for quasi-Newton approach
     visited = Set{typeof(root)}()
     dimorder = sortperm(length.(mes))  # process the dimensions with the shortest queues first
     fvalueT = T(fvalue)
@@ -600,10 +600,12 @@ function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, a
     # The quasi-Newton step can reduce the function value so significantly, insist on
     # using it at least once.
     used_quasinewton = false
+    nquasinewton = 3*qnthresh(ndims(root))
     while boxval > fvalue && (tol_counter <= ndims(root) || !used_quasinewton) && len < maxevals
         lastval = boxval
-        _, qn = sweep!(root, fc, x0, splits, lower, upper; extrapolate=extrapolate, fvalue=fvalue, kwargs...)
+        _, qn = sweep!(root, fc, x0, splits, lower, upper; extrapolate=extrapolate, fvalue=fvalue, nquasinewton=nquasinewton, kwargs...)
         used_quasinewton |= qn
+        nquasinewton = qmodel_thresh[]
         extrapolate = !extrapolate
         box = minimum(root)
         boxval = value(box)
