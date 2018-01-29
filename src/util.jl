@@ -4,6 +4,14 @@ dummyvalue(::Type{T}) where T = typemax(T)
 isdummy(val::T) where T = isequal(val, dummyvalue(T))
 
 """
+    qnthresh(N)
+
+Return the minimum number of points needed to specify the quasi-Newton quadratic model
+in `N` dimensions.
+"""
+qnthresh(N) = ((N+1)*(N+2))÷2
+
+"""
    xvert, fvert, qcoef = qfit(xm=>fm, x0=>f0, xp=>fp)
 
 Given three points `xm < x0 < xp ` and three corresponding
