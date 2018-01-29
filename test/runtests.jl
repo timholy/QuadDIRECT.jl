@@ -328,6 +328,18 @@ end
     @test length(leaves(root)) < 300
 end
 
+@testset "Infinite return values" begin
+    canyonb(x) = x[2] > -0.1 ? Inf : canyon(x)
+    splits = ([-11,-10,-9], [-7,-6,-5])
+    lower, upper = [-Inf, -Inf], [Inf, Inf]
+    root, x0 = analyze(canyonb, splits, lower, upper)
+    box = minimum(root)
+    x = position(box, x0)
+    @test x[2] <= -0.1
+    @test value(box) < 0.01
+    @test length(leaves(root)) < 500
+end
+
 @testset "High dimensional" begin
     B = randn(41, 40); B = B'*B
     D, V = eig(B)
