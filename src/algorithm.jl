@@ -1,3 +1,5 @@
+const qmodel_thresh = Ref(0)
+
 function init(f, xsplits, lower::AbstractVector, upper::AbstractVector)
     # Validate the inputs
     n = length(lower)
@@ -101,14 +103,14 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
     end
     bb = boxbounds(p)
     bb[2]-bb[1] >= minwidth[splitdim] || return (box, false)
-    N = ndims(box)
-    nqn = ((N+1)*(N+2))÷2  # number of points needed for quasi-Newton approach
-    if f.evals > 3*nqn     # make sure there is some excess
+    if f.evals > qmodel_thresh[]     # make sure there is some excess
         Q, xbase, c = build_quadratic_model(box, x0)
         if Q.nzrows[] == size(Q.coefs, 1)
             g, B = solve(Q)
             success = quasinewton!(box, mes, B, g, c, f, x0, splitdim, lower, upper)
             return box, success
+        else
+            qmodel_thresh[] *= 2
         end
     end
     xp, fp = p.parent.xvalues, p.parent.fvalues
@@ -204,6 +206,7 @@ end
 # (once permuted into the order specified by dimpiv).
 function Base.insert!(Q::QmIGE{T}, Δx, Δf, splitdim::Integer) where T
     myapprox(x, y, rtol) = isequal(x, y) | (abs(x-y) < rtol*(abs(x) + abs(y)))
+    # rtol = 1000*eps(T)
     rtol = sqrt(eps(T))
     coefs, rhs, rowtmp = Q.coefs, Q.rhs, Q.rowtmp
     dimpiv, rowzero, ndims_old = Q.dimpiv, Q.rowzero, Q.ndims[]
@@ -484,6 +487,8 @@ function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper; m
     nleaves0 = count(x->true, leaves(root))
     nprocessed = 0
     used_quasinewton = false
+    N = ndims(root)
+    qmodel_thresh[] = 3*((N+1)*(N+2))÷2  # number of points needed for quasi-Newton approach
     visited = Set{typeof(root)}()
     dimorder = sortperm(length.(mes))  # process the dimensions with the shortest queues first
     for i in dimorder
@@ -593,7 +598,7 @@ function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, a
     # The quasi-Newton step can reduce the function value so significantly, insist on
     # using it at least once.
     used_quasinewton = false
-    while boxval > fvalue && (tol_counter <= ndims(box) || !used_quasinewton) && len < maxevals
+    while boxval > fvalue && (tol_counter <= ndims(root) || !used_quasinewton) && len < maxevals
         lastval = boxval
         _, qn = sweep!(root, fc, x0, splits, lower, upper; extrapolate=extrapolate, kwargs...)
         used_quasinewton |= qn
