@@ -202,7 +202,9 @@ end
 # points tend to build a lower-triangular matrix: the tree structure
 # adds dimensions one at a time, so Δx will be all-zeros for trailing dimensions
 # (once permuted into the order specified by dimpiv).
-function Base.insert!(Q::QmIGE, Δx, Δf, splitdim::Integer)
+function Base.insert!(Q::QmIGE{T}, Δx, Δf, splitdim::Integer) where T
+    myapprox(x, y, rtol) = isequal(x, y) | (abs(x-y) < rtol*(abs(x) + abs(y)))
+    rtol = sqrt(eps(T))
     coefs, rhs, rowtmp = Q.coefs, Q.rhs, Q.rowtmp
     dimpiv, rowzero, ndims_old = Q.dimpiv, Q.rowzero, Q.ndims[]
     ndims = setrow!(rowtmp, dimpiv, Δx, ndims_old, splitdim)
@@ -232,7 +234,7 @@ function Base.insert!(Q::QmIGE, Δx, Δf, splitdim::Integer)
         lastnz -= 1
     end
     i = lastnz + (lastnz*(lastnz+1))÷2
-    while i > 0
+    @inbounds while i > 0
         if rowtmp[i] == 0
             i -= 1
             continue
@@ -248,7 +250,8 @@ function Base.insert!(Q::QmIGE, Δx, Δf, splitdim::Integer)
         c = rowtmp[i]/coefs[i,i]
         for j = 1:i-1
             sub = c * coefs[i,j]
-            rowtmp[j] = rowtmp[j] ≈ sub ? zero(sub) : rowtmp[j] - sub
+            # rowtmp[j] = rowtmp[j] ≈ sub ? zero(sub) : rowtmp[j] - sub
+            rowtmp[j] = myapprox(rowtmp[j], sub, rtol) ? zero(sub) : rowtmp[j] - sub
         end
         rowtmp[i] = 0  # in case of roundoff error
         Δf -= c*rhs[i]
