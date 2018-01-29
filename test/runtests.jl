@@ -327,3 +327,19 @@ end
     root, x0 = analyze(canyon, splits, lower, upper)
     @test length(leaves(root)) < 300
 end
+
+@testset "High dimensional" begin
+    B = randn(41, 40); B = B'*B
+    D, V = eig(B)
+    i = 1
+    while D[i] < 1e-4*D[end]
+        D[i] = 1e-4*D[end]
+    end
+    B = V*Diagonal(sqrt.(D)); B = B'*B
+    h(x) = (x'*B*x)/2
+    splits = [[-3,-2,-1] for i = 1:size(B,1)]
+    upper = fill(Inf, size(B,1))
+    lower = -upper
+    root, x0 = analyze(h, splits, lower, upper; maxevals=10000, fvalue=1e-3)
+    @test value(minimum(root)) <= 1e-3
+end
