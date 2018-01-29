@@ -12,8 +12,18 @@ MCS: Huyer, Waltraud, and Arnold Neumaier. "Global optimization by multilevel co
 
 There is no formal published description (yet), but it expands upon DIRECT by:
 - allowing boxes to be of different sizes, and supporting boxes that extend to infinity
+- not assuming that the coordinates form a metric space: each dimension is treated independently of the others, and at no
+  point calculating distances based on combining information across coordinates
 - it splits boxes at points suspected of being minima as judged by a
-  local quadratic model of the function.
+  local one-dimensional quadratic model of the function
+- once enough boxes have been created, it attempts "local search," building a dense quadratic model and
+  performing a quasi-Newton optimization.
+
+Unlike MCS,
+- the geometry is more similar to DIRECT, in that each box is affiliated with a different point of function evaluation
+- it uses the "Pareto front" concept of DIRECT, rather than a heuristic splitting scheme based on levels
+- the local search is not disconnected from the box-splitting: the function evaluations used in local search
+  get entered into the tree structure, providing the opportunity to re-use those function evaluations for further improvements
 
 As a simple demonstration, consider the "6-hump camel function":
 
