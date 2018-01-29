@@ -76,12 +76,14 @@ mutable struct Box{T,N}
     parent::Box{T,N}
     parent_cindex::Int    # of its parent's children, which one is this?
     splitdim::Int         # the dimension along which this box has been split, or 0 if this is a leaf node
+    qtargeted::Bool       # true if the box has been targeted as a minimum by a full (dense) quadratic fit
     minmax::Tuple{T,T}    # the outer edges not corresponding to one of the parent's xvalues (splits that occur between dots in Fig 2)
     xvalues::MVector3{T}  # the values of x_splitdim at which f is evaluated
     fvalues::MVector3{T}  # the corresponding values of f
     children::MVector3{Box{T,N}}
 
     function default!(box::Box{T,N}) where {T,N}
+        box.qtargeted = false
         box.minmax = (typemax(T), typemin(T))
         box.xvalues = MVector3{T}(typemax(T), zero(T), typemin(T))
         box.fvalues = MVector3{T}(zero(T), zero(T), zero(T))
@@ -112,3 +114,38 @@ isleaf(box::Box) = box.splitdim == 0
 Base.parent(box::Box) = box.parent
 Base.ndims(box::Box{T,N}) where {T,N} = N
 Base.iteratorsize(::Type{<:Box}) = Base.SizeUnknown()
+
+# A function that keeps track of the number of evaluations
+mutable struct CountedFunction{F} <: Function
+    f::F
+    evals::Int
+
+    CountedFunction{F}(f) where F = new{F}(f, 0)
+end
+CountedFunction(f::Function) = CountedFunction{typeof(f)}(f)
+
+function (f::CountedFunction{F})(x::AbstractVector) where F
+    f.evals += 1
+    return f.f(x)
+end
+
+# Quadratic-model Incremental Gaussian Elimination
+struct QmIGE{T,N}
+    coefs::PermutedDimsArray{T,2,(2, 1),(2, 1),Array{T,2}} # to make row-major operations fast
+    rhs::Vector{T}
+    dimpiv::Vector{Int}   # order in which dimensions were added
+    rowzero::Vector{Bool} # true if a row in coefs is all-zeros
+    ndims::typeof(Ref(1)) # number of dimensions added so far
+    nzrows::typeof(Ref(1))
+    rowtmp::Vector{T}
+end
+
+function QmIGE{T,N}() where {T,N}
+    m = ((N+1)*(N+2))÷2 - 1  # the constant is handled separately
+    coefs = PermutedDimsArray(zeros(T, m, m), (2, 1))
+    rhs = zeros(T, m)
+    rowtmp = zeros(T, m)
+    dimpiv = zeros(Int, N)
+    rowzero = fill(true, m)
+    QmIGE{T,N}(coefs, rhs, dimpiv, rowzero, Ref(0), Ref(0), rowtmp)
+end

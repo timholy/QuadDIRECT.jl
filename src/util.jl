@@ -1,6 +1,8 @@
 dummyvalue(::Type{T}) where T<:AbstractFloat = T(NaN)
 dummyvalue(::Type{T}) where T = typemax(T)
 
+isdummy(val::T) where T = isequal(val, dummyvalue(T))
+
 """
    xvert, fvert, qcoef = qfit(xm=>fm, x0=>f0, xp=>fp)
 
@@ -48,8 +50,9 @@ Note that `Δf` might be -Inf, if `box` is unbounded and the quadratic estimate
 is not convex.
 """
 function qdelta(box::Box)
-    xm, x0, xp = box.parent.xvalues
-    fm, f0, fp = box.parent.fvalues
+    xv, fv = box.parent.xvalues, box.parent.fvalues
+    xm, x0, xp = xv[1], xv[2], xv[3]
+    fm, f0, fp = fv[1], fv[2], fv[3]
     fbox = box.parent.fvalues[box.parent_cindex]
     cm, c0, cp = lagrangecoefs(xm=>fm, x0=>f0, xp=>fp)
     qvalue(x) = cm*(x-x0)*(x-xp) + c0*(x-xm)*(x-xp) + cp*(x-xm)*(x-x0)
@@ -161,7 +164,7 @@ function Base.show(io::IO, mel::MELink)
 end
 
 
-## Box utilities
+### Box utilities
 function Base.show(io::IO, box::Box)
     x = fill(NaN, ndims(box))
     position!(x, box)
@@ -176,6 +179,16 @@ end
 value_safe(box::Box{T}) where T = isroot(box) ? typemax(T) : value(box)
 
 Base.isless(box1::Box, box2::Box) = isless(value_safe(box1), value_safe(box2))
+
+function pick_other(xvalues, fvalues, idx)
+    j = 1
+    if j == idx j += 1 end
+    xf1 = xvalues[j] => fvalues[j]
+    j += 1
+    if j == idx j += 1 end
+    xf2 = xvalues[j] => fvalues[j]
+    return xf1, xf2
+end
 
 function treeprint(io::IO, f::Function, root::Box)
     show(io, root)
@@ -261,6 +274,30 @@ function find_smallest_child_leaf(box::Box)
         box = box.children[idx]
     end
     box
+end
+
+"""
+    dims_targeted = qtargeted(box, xsource, lower, upper)
+
+Returns coordinatewise `true` if `xsource` is external to an ancestor of `box`,
+split along the corresponding dimension, that has already been
+targeted as a minimum by a full quadratic model.
+"""
+function qtargeted(box, xsource, lower, upper)
+    bbs = boxbounds(box, lower, upper)
+    dims_targeted = falses(ndims(box))
+    while true
+        if box.qtargeted
+            if !isinside(xsource, bbs)
+                dims_targeted[box.splitdim] = true
+            end
+        end
+        isroot(box) && return dims_targeted
+        box = box.parent
+        if !isroot(box)
+            bbs[box.parent.splitdim] = boxbounds(box)
+        end
+    end
 end
 
 """
@@ -417,6 +454,16 @@ function boxbounds(box::Box{T}, lower::AbstractVector, upper::AbstractVector) wh
     boxbounds!(bb, box)
 end
 
+"""
+    bb = boxbounds(box, splitdim::Integer, lower::AbstractVector, upper::AbstractVector)
+
+Compute the bounds of `box` along dimension `splitdim`.
+"""
+function boxbounds(box::Box{T}, splitdim::Integer, lower::AbstractVector, upper::AbstractVector) where T
+    p = find_parent_with_splitdim(box, splitdim)
+    boxbounds(p, lower[splitdim], upper[splitdim])
+end
+
 function boxbounds!(bb, box::Box)
     flag = falses(ndims(box))
     boxbounds!(bb, flag, box)
@@ -521,6 +568,77 @@ function Base.extrema(root::Box)
     minv, maxv
 end
 
+## Utilities for experimenting with topology of the tree
+function splitprint(io::IO, box::Box)
+    if isleaf(box)
+        print(io, 'l')
+    else
+        print(io, box.splitdim, '(')
+        splitprint(io, box.children[1])
+        print(io, ", ")
+        splitprint(io, box.children[2])
+        print(io, ", ")
+        splitprint(io, box.children[3])
+        print(io, ')')
+    end
+end
+splitprint(box::Box) = splitprint(STDOUT, box)
+
+function splitprint_red(io::IO, box::Box, thisbox::Box)
+    if isleaf(box)
+        box == thisbox ? print_with_color(:light_red, io, 'l') : print(io, 'l')
+    else
+        box == thisbox ? print_with_color(:light_red, io, box.splitdim) : print(io, box.splitdim)
+        print(io, '(')
+        splitprint_red(io, box.children[1], thisbox)
+        print(io, ", ")
+        splitprint_red(io, box.children[2], thisbox)
+        print(io, ", ")
+        splitprint_red(io, box.children[3], thisbox)
+        print(io, ')')
+    end
+end
+splitprint_red(box::Box, thisbox::Box) = splitprint_red(STDOUT, box, thisbox)
+
+function Base.parse(::Type{B}, str::AbstractString) where B<:Box
+    b = B()
+    splitbox!(b, str)
+end
+
+# splitbox! uses integer-valued positions and sets all function values to 0
+function splitbox!(box::Box{T,N}, dim) where {T,N}
+    x = position(box, zeros(N))
+    xd = x[dim]
+    add_children!(box, dim, [xd,xd+1,xd+2], zeros(3), -Inf, Inf)
+    box
+end
+
+function splitbox!(box::Box, str::AbstractString)
+    str == "l" && return
+    m = match(r"([0-9]*)\((.*)\)", str)
+    dim = parse(Int, m.captures[1])
+    dimstr = m.captures[2]
+    splitbox!(box, dim)
+    commapos = [0,0]
+    commaidx = 0
+    open = 0
+    i = start(dimstr)
+    while !done(dimstr, i)
+        c, i = next(dimstr, i)
+        if c == '('
+            open += 1
+        elseif c == ')'
+            open -= 1
+        elseif c == ',' && open == 0
+            commapos[commaidx+=1] = prevind(dimstr, i)
+        end
+    end
+    splitbox!(box.children[1], strip(dimstr[1:prevind(dimstr, commapos[1])]))
+    splitbox!(box.children[2], strip(dimstr[nextind(dimstr, commapos[1]):prevind(dimstr, commapos[2])]))
+    splitbox!(box.children[3], strip(dimstr[nextind(dimstr, commapos[2]):end]))
+    return box
+end
+
 ## Tree traversal
 function get_root(box::Box)
     while !isroot(box)
@@ -532,12 +650,12 @@ end
 abstract type DepthFirstIterator end
 Base.iteratorsize(::Type{<:DepthFirstIterator}) = Base.SizeUnknown()
 
-struct DepthFirstLeafIterator{T} <: DepthFirstIterator
-    root::Box{T}
+struct DepthFirstLeafIterator{B<:Box} <: DepthFirstIterator
+    root::B
 end
 
-struct VisitorBool{T}
-    box::Box{T}
+struct VisitorBool{B<:Box}
+    box::B
     done::Bool
 end
 
@@ -603,7 +721,7 @@ replacecoordinate!(x, i::Integer, val) = (x[i] = val; x)
 
 replacecoordinate!(x::SVector{N,T}, i::Integer, val) where {N,T} =
     SVector{N,T}(_rpc(Tuple(x), i-1, T(val)))
-@inline _rpc(t, i, val) = (ifelse(i == 0, val, t[1]), _rpc(tail(t), i-1, val)...)
+@inline _rpc(t, i, val) = (ifelse(i == 0, val, t[1]), _rpc(Base.tail(t), i-1, val)...)
 _rps(::Tuple{}, i, val) = ()
 
 ipcopy!(dest, src) = copy!(dest, src)
@@ -641,6 +759,20 @@ function biggest_interval(a, b, c, d)
     return (c, d)
 end
 
+function ensure_distinct(x::T, xref, bb::Tuple{Real,Real}; minfrac = 0.1) where T
+    Δx = min(xref - bb[1], bb[2] - xref)
+    if !isfinite(Δx)
+        x != xref && return x
+        return xref + 1
+    end
+    Δxmin = T(minfrac*Δx)
+    if abs(x - xref) < Δxmin
+        s = x == xref ? (bb[2] - xref > xref - bb[1] ? 1 : -1) : sign(x-xref)
+        x = T(xref + Δxmin*s)
+    end
+    return x
+end
+
 function ensure_distinct(x::T, x1, x2, bb::Tuple{Real,Real}; minfrac = 0.1) where T
     x1, x2 = lohi(x1, x2)
     Δxmin = minfrac*(x2-x1)
@@ -652,4 +784,63 @@ function ensure_distinct(x::T, x1, x2, bb::Tuple{Real,Real}; minfrac = 0.1) wher
         x = T(min(bb[2], x2 + Δxmin*s))
     end
     return x
+end
+
+"""
+    t, exitdim = pathlength_box_exit(x0, dx, bb)
+
+Given a ray `x0 + t*dx`, compute the value of `t` at which the ray exits the box
+delimited by `bb` (a vector of `(lo, hi)` tuples). Also return the coordinate dimension
+along which the exit occurs.
+"""
+function pathlength_box_exit(x0, dx, bb)
+    t = oftype((bb[1][1] - x0[1])/dx[1], Inf)
+    exitdim = 0
+    for i = 1:length(x0)
+        xi, dxi, bbi = x0[i], dx[i], bb[i]
+        ti = (ifelse(dxi >= 0, bbi[2], bbi[1]) - xi)/dxi
+        if ti < t
+            t = ti
+            exitdim = i
+        end
+    end
+    t, exitdim
+end
+
+"""
+    t, intersectdim = pathlength_hyperplane_intersect(x0, dx, xtarget, tmax)
+
+Compute the maximum pathlength `t` (up to a value of `tmax`) at which the ray `x0 + t*dx`
+intersects one of the hyperplanes specified by `x[i] = xtarget[i]` for any dimension `i`.
+"""
+function pathlength_hyperplane_intersect(x0, dx, xtarget, tmax)
+    t = zero(typeof((xtarget[1] - x0[1])/dx[1]))
+    intersectdim = 0
+    for i = 1:length(x0)
+        xi, dxi, xti = x0[i], dx[i], xtarget[i]
+        ti = (xti - xi)/dxi
+        if ti <= tmax && ti > t
+            t = ti
+            intersectdim = i
+        end
+    end
+    t, intersectdim
+end
+
+"""
+    a, b, c = pick3(a, b, (lower::Real, upper::Real))
+
+Returns an ordered triple `a, b, c`, with two agreeing with the input `a` and `b`,
+and the third point bisecting the largest interval between `a`, `b`, and the edges
+`lower`, `upper`.
+"""
+function pick3(a, b, bb)
+    a, b = lohi(a, b)
+    imin, imax = biggest_interval(bb[1], a, b, bb[2])
+    if isinf(imin)
+        return a-2*(b-a), a, b
+    elseif isinf(imax)
+        return a, b, b+2*(b-a)
+    end
+    return a, b, c = lohi(a, b, (imin+imax)/2)
 end
