@@ -99,16 +99,16 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
         xcur, fcur = x0[splitdim], box.parent.fvalues[box.parent_cindex]
         split!(box, f, xtmp, splitdim, xsplitdefault, lwr, upr, xcur, fcur)
         trimschedule!(mes, box, splitdim, x0, lower, upper)
-        return box, false
+        return box, false, minimum(box.fvalues)
     end
     bb = boxbounds(p)
-    bb[2]-bb[1] >= minwidth[splitdim] || return (box, false)
+    bb[2]-bb[1] >= minwidth[splitdim] || return (box, false, value(box))
     if f.evals > qmodel_thresh[]     # make sure there is some excess
         Q, xbase, c = build_quadratic_model(box, x0)
         if Q.nzrows[] == size(Q.coefs, 1)
             g, B = solve(Q)
-            success = quasinewton!(box, mes, B, g, c, f, x0, splitdim, lower, upper)
-            return box, success
+            success, minvalue = quasinewton!(box, mes, B, g, c, f, x0, splitdim, lower, upper)
+            return box, success, minvalue
         else
             qmodel_thresh[] *= 2
         end
@@ -156,7 +156,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
             add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
                           MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
             trimschedule!(mes, box, splitdim, x0, lower, upper)
-            return box, false
+            return box, false, minimum(box.fvalues)
         end
         # xvert is not in the box. Prepare to split the neighbor, but for this box
         # just bisect xcur and xnew
@@ -173,7 +173,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
         add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
                     MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
         trimschedule!(mes, box, splitdim, x0, lower, upper)
-        (!success || nbr ∈ visited) && return (box, false) # don't get into a cycle
+        (!success || nbr ∈ visited) && return (box, false, minimum(box.fvalues)) # don't get into a cycle
         return autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, minwidth, push!(visited, box))
     end
     # Trisect
@@ -194,7 +194,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
     end
     split!(box, f, xtmp, splitdim, MVector3{T}(a, b, c), bb..., xcur, fcur)
     trimschedule!(mes, box, splitdim, x0, lower, upper)
-    return box, false
+    return box, false, minimum(box.fvalues)
 end
 
 ## Use regression to compute the best-fit quadratic model (with a dense Hessian)
@@ -206,8 +206,7 @@ end
 # (once permuted into the order specified by dimpiv).
 function Base.insert!(Q::QmIGE{T}, Δx, Δf, splitdim::Integer) where T
     myapprox(x, y, rtol) = isequal(x, y) | (abs(x-y) < rtol*(abs(x) + abs(y)))
-    # rtol = 1000*eps(T)
-    rtol = sqrt(eps(T))
+    rtol = 1000*eps(T)
     coefs, rhs, rowtmp = Q.coefs, Q.rhs, Q.rowtmp
     dimpiv, rowzero, ndims_old = Q.dimpiv, Q.rowzero, Q.ndims[]
     ndims = setrow!(rowtmp, dimpiv, Δx, ndims_old, splitdim)
@@ -359,6 +358,7 @@ function descend!(Q, box, x0, xbase, c, skip=false)
 end
 
 function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, itermax = 20) where T
+    fbox = fmin = value(box)
     cB = cholfact(Positive, B)
     Δx = -(cB \ g)
     α = T(1.0)
@@ -368,11 +368,10 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
         α /= 2
         iter += 1
     end
-    iter == itermax && return false
+    iter == itermax && return false, fmin
     iter = 0 # the above weren't "real" iterations, so reset
     root = get_root(box)
     # Do a backtracking linesearch
-    fbox = value(box)
     while iter < itermax
         iter += 1
         xtarget = x + α*Δx
@@ -407,13 +406,13 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
             leaf.qtargeted = true
             xleaf = position(leaf, x0)
             xtest = copy(xleaf)
-            imin, fmin = 0, typemax(T)
+            imin, qmin = 0, typemax(T)
             for i = 1:ndims(leaf)
                 dims_targeted[i] && continue
                 xtest = replacecoordinate!(xtest, i, xtarget[i])
                 qx = q(xtest)
-                if qx < fmin
-                    fmin = qx
+                if qx < qmin
+                    qmin = qx
                     imin = i
                 end
             end
@@ -428,13 +427,14 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
                 continue
             end
             split!(leaf, f, xleaf, imin, MVector3{T}(a, b, c), bb..., xleaf[imin], value(leaf))
+            fmin = min(fmin, minimum(leaf.fvalues))
             childindex = findfirst(equalto(xt), leaf.xvalues)
             leaf = leaf.children[childindex]
             dims_targeted[imin] = true
         end
-        return true
+        return true, fmin
     end
-    return false
+    return false, fmin
 end
 
 # Might want to add leaf to mes?
@@ -476,11 +476,11 @@ function trimschedule!(mes::Vector{<:MELink}, box::Box, splitdim, x0, lower, upp
     return mes
 end
 
-function sweep!(root::Box, f, x0, splits, lower, upper; extrapolate::Bool = true, minwidth=zeros(eltype(x0), ndims(root)))
+function sweep!(root::Box, f, x0, splits, lower, upper; extrapolate::Bool = true, fvalue=-Inf, minwidth=zeros(eltype(x0), ndims(root)))
     mes = minimum_edges(root, x0, lower, upper, minwidth; extrapolate=extrapolate)
-    sweep!(root, mes, f, x0, splits, lower, upper; minwidth=minwidth)
+    sweep!(root, mes, f, x0, splits, lower, upper; fvalue=fvalue, minwidth=minwidth)
 end
-function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper; minwidth=zeros(eltype(x0), ndims(root)))
+function sweep!(root::Box{T}, mes::Vector{<:MELink}, f, x0, splits, lower, upper; fvalue=-Inf, minwidth=zeros(eltype(x0), ndims(root))) where T
     xtmp = similar(x0)
     flag = similar(x0, Bool)
     nsplits = similar(x0, Int)
@@ -491,6 +491,7 @@ function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper; m
     qmodel_thresh[] = 3*((N+1)*(N+2))÷2  # number of points needed for quasi-Newton approach
     visited = Set{typeof(root)}()
     dimorder = sortperm(length.(mes))  # process the dimensions with the shortest queues first
+    fvalueT = T(fvalue)
     for i in dimorder
         me = mes[i]
         while !isempty(me)
@@ -507,8 +508,9 @@ function sweep!(root::Box, mes::Vector{<:MELink}, f, x0, splits, lower, upper; m
             end
             nprocessed += 1
             empty!(visited)
-            _, qn = autosplit!(box, mes, f, x0, xtmp, i, splits, lower, upper, minwidth, visited)
+            _, qn, minval = autosplit!(box, mes, f, x0, xtmp, i, splits, lower, upper, minwidth, visited)
             used_quasinewton |= qn
+            minval <= fvalueT && return root, used_quasinewton
         end
     end
     # println(nprocessed, " processed, starting with ", nleaves0, " leaves and ending with ", count(x->true, leaves(root)))
@@ -600,7 +602,7 @@ function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, a
     used_quasinewton = false
     while boxval > fvalue && (tol_counter <= ndims(root) || !used_quasinewton) && len < maxevals
         lastval = boxval
-        _, qn = sweep!(root, fc, x0, splits, lower, upper; extrapolate=extrapolate, kwargs...)
+        _, qn = sweep!(root, fc, x0, splits, lower, upper; extrapolate=extrapolate, fvalue=fvalue, kwargs...)
         used_quasinewton |= qn
         extrapolate = !extrapolate
         box = minimum(root)
