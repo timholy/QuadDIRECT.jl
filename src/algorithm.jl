@@ -320,9 +320,11 @@ function build_quadratic_model(box::Box{T,N}, x0) where {T,N}
     Q = QmIGE{T,N}()
     c = value(box)
     xbase = position(box, x0)
+    xtmp = similar(xbase)
+    flag = similar(xtmp, Bool)
     if !isleaf(box)
         for i = 1:3
-            descend!(Q, box.children[i], x0, xbase, c)
+            descend!(Q, box.children[i], x0, xbase, c, xtmp, flag)
         end
     end
     while Q.nzrows[] < length(Q.rhs) && !isroot(box)
@@ -330,17 +332,17 @@ function build_quadratic_model(box::Box{T,N}, x0) where {T,N}
         box = box.parent
         j = 1
         if j == cindex j+=1 end
-        descend!(Q, box.children[j], x0, xbase, c)
+        descend!(Q, box.children[j], x0, xbase, c, xtmp, flag)
         j += 1
         if j == cindex j+=1 end
-        descend!(Q, box.children[j], x0, xbase, c)
+        descend!(Q, box.children[j], x0, xbase, c, xtmp, flag)
     end
     return Q, xbase, c
 end
 
-function descend!(Q, box, x0, xbase, c, skip=false)
+function descend!(Q, box, x0, xbase, c, Δx, flag, skip::Bool=false)
     Q.nzrows[] == length(Q.rhs) && return Q
-    Δx = position(box, x0)
+    position!(Δx, flag, box, x0)
     thisx = isleaf(box) ? zero(eltype(Δx)) : Δx[box.splitdim]
     if !skip
         for i = 1:length(Δx)
@@ -351,7 +353,7 @@ function descend!(Q, box, x0, xbase, c, skip=false)
     if !isleaf(box)
         iskip = findfirst(equalto(thisx), box.xvalues)
         for i = 1:3
-            descend!(Q, box.children[i], x0, xbase, c, i==iskip)
+            descend!(Q, box.children[i], x0, xbase, c, Δx, flag, i==iskip)
         end
     end
     return Q
