@@ -329,15 +329,34 @@ end
 end
 
 @testset "Infinite return values" begin
+    # Performance isn't great, but you can (if needed) return Inf as a way of imposing
+    # additional constraints.
+    # It would be better to have a more comprehensive solution.
     canyonb(x) = x[2] > -0.1 ? Inf : canyon(x)
+    fc = QuadDIRECT.CountedFunction(canyonb)
     splits = ([-11,-10,-9], [-7,-6,-5])
     lower, upper = [-Inf, -Inf], [Inf, Inf]
-    root, x0 = analyze(canyonb, splits, lower, upper)
+    root, x0 = analyze(fc, splits, lower, upper)
     box = minimum(root)
     x = position(box, x0)
     @test x[2] <= -0.1
     @test value(box) < 0.01
-    @test length(leaves(root)) < 500
+    @test fc.evals < 500
+    fc = QuadDIRECT.CountedFunction(canyonb)
+    box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
+    root = QuadDIRECT.get_root(box)
+    iter = 0
+    while value(minimum(root)) > 0.1 && iter < 100
+        iter += 1
+        QuadDIRECT.sweep!(root, fc, x0, splits, lower, upper; nquasinewton=typemax(Int))
+    end
+    @test iter < 100
+    @test fc.evals < 5000
+    fc = QuadDIRECT.CountedFunction(canyonb)
+    splits = ([-2,-1,0], [-1, -0.5, -0.15])
+    root, x0 = analyze(fc, splits, lower, upper; fvalue=0.005, rtol=0, maxevals=10000)
+    @test fc.evals < 500
+    @test value(minimum(root)) < 0.005
 end
 
 @testset "High dimensional" begin

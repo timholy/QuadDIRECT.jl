@@ -173,7 +173,9 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
         add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
                     MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
         trimschedule!(mes, box, splitdim, x0, lower, upper)
-        (!success || nbr ∈ visited) && return (box, false, minimum(box.fvalues)) # don't get into a cycle
+        if !success || nbr ∈ visited || !isfinite(value(nbr))
+            return (box, false, minimum(box.fvalues)) # check nbr ∈ visited to avoid cycles
+        end
         return autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, minwidth, push!(visited, box))
     end
     # Trisect
@@ -330,6 +332,7 @@ function build_quadratic_model(box::Box{T,N}, x0) where {T,N}
     while Q.nzrows[] < length(Q.rhs) && !isroot(box)
         cindex = box.parent_cindex
         box = box.parent
+        all(isfinite, box.fvalues) || break
         j = 1
         if j == cindex j+=1 end
         descend!(Q, box.children[j], x0, xbase, c, xtmp, flag)
@@ -361,6 +364,7 @@ end
 
 function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, itermax = 20) where T
     fbox = fmin = value(box)
+    isfinite(fbox) || return false, fmin
     cB = cholfact(Positive, B)
     Δx = -(cB \ g)
     α = T(1.0)
@@ -385,6 +389,7 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
             continue
         end
         leaf = find_leaf_at(root, xtarget)
+        isfinite(value(leaf)) || return false, fmin
 
         # # If leaf or one of its ancestors has been targeted before from an "external" box,
         # # terminate. The only allowed re-targetings are from inside the narrowest box yet
@@ -454,6 +459,7 @@ function minimum_edges(root::Box{T,N}, x0, lower, upper, minwidth=zeros(eltype(x
     nsplits = Vector{Int}(uninitialized, N)
     for box in leaves(root)
         fval = value(box)
+        isfinite(fval) || continue
         count_splits!(nsplits, box)
         nmin = minimum(nsplits)
         for i = 1:N
