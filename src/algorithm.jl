@@ -365,26 +365,32 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
     iter == itermax && return false
     iter = 0 # the above weren't "real" iterations, so reset
     root = get_root(box)
-    # Do a backtracking linesearch, splitting any boxes that we encounter along the way
+    # Do a backtracking linesearch
     fbox = value(box)
     while iter < itermax
         iter += 1
         xtarget = x + α*Δx
+        # Sadly, the following function evaluations get discarded. But recording them
+        # while preserving the box structure would take ndims(box)-1 additional
+        # evaluations, which is not worth it unless xtarget itself is an improvement.
         if f(xtarget) > fbox
             α /= 2
             continue
         end
         leaf = find_leaf_at(root, xtarget)
-        # If leaf or one of its ancestors has been targeted before from an "external" box,
-        # terminate. The only allowed re-targetings are from inside the narrowest box yet
-        # targeted. This prevents running many line searches that all point to the same minimum.
-        if leaf != box
-            dims_targeted = qtargeted(leaf, x, lower, upper)
-            if all(dims_targeted)
-                iter == 1 && record_targeted!(mes, leaf, splitdim)
-                return false
-            end
-        end
+
+        # # If leaf or one of its ancestors has been targeted before from an "external" box,
+        # # terminate. The only allowed re-targetings are from inside the narrowest box yet
+        # # targeted. This prevents running many line searches that all point to the same minimum.
+        # if leaf != box
+        #     dims_targeted = qtargeted(leaf, x, lower, upper)
+        #     if all(dims_targeted)
+        #         println("targeted ", xtarget, " with ", α)
+        #         iter == 1 && record_targeted!(mes, leaf, splitdim)
+        #         return false
+        #     end
+        # end
+
         # For consistency with the tree structure, we can change only one coordinate of
         # xleaf per split. Cycle through all coordinates, picking the one at each stage
         # that yields the smallest value as predicted by the quadratic model among the

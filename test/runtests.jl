@@ -324,6 +324,6 @@ end
     xmin, fmin = minimize(canyon, splits, lower, upper; atol=1e-3)
     @test fmin < 1e-10
     @test norm(xmin) < 1e-5
-    root, x0 = analyze(camel, splits, lower, upper)
+    root, x0 = analyze(canyon, splits, lower, upper)
     @test length(leaves(root)) < 300
 end
