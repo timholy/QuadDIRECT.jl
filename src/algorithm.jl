@@ -108,7 +108,10 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
         if Q.nzrows[] == size(Q.coefs, 1)
             g, B = solve(Q)
             success, minvalue = quasinewton!(box, mes, B, g, c, f, x0, splitdim, lower, upper)
-            return box, success, minvalue
+            # `box` itself might not have been split, if the Newton estimate was in
+            # a different leaf.
+            # Since `box` got queued, we shouldn't return until it's been split
+            !isleaf(box) && return (box, success, minvalue)
         else
             qmodel_thresh[] *= 2
         end
@@ -482,6 +485,17 @@ function trimschedule!(mes::Vector{<:MELink}, box::Box, splitdim, x0, lower, upp
         end
     end
     return mes
+end
+
+function mesprint(mes)
+    for i = 1:length(mes)
+        print(i, ": ")
+        for item in mes[i]
+            print(", (", item.w, ',', item.f, ')')
+        end
+        println()
+    end
+    nothing
 end
 
 function sweep!(root::Box, f, x0, splits, lower, upper; extrapolate::Bool = true, fvalue=-Inf, nquasinewton=3*qnthresh(ndims(root)), minwidth=zeros(eltype(x0), ndims(root)))
