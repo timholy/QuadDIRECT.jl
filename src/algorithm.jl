@@ -55,7 +55,7 @@ function split!(box::Box{T}, f, xtmp, splitdim, xsplit, lower::Real, upper::Real
         end
         fsplit[l] = ftmp
     end
-    idxmin == 0 && error("function was not finite at any evaluation point")
+    idxmin == 0 && error("function was not finite at any evaluation point $xsplit")
     if idxmin == 1 && fsplit[1] == fsplit[2]
         idxmin = 2  # prefer the middle in case of ties
     end
@@ -387,12 +387,15 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
         # Sadly, the following function evaluations get discarded. But recording them
         # while preserving the box structure would take ndims(box)-1 additional
         # evaluations, which is not worth it unless xtarget itself is an improvement.
-        if f(xtarget) > fbox
+        ftarget = f(xtarget)
+        if ftarget > fbox
             α /= 2
             continue
         end
         leaf = find_leaf_at(root, xtarget)
         isfinite(value(leaf)) || return false, fmin
+        # The new point should improve on what was already obtained in `leaf`
+        ftarget < value(leaf) || return false, fmin
 
         # # If leaf or one of its ancestors has been targeted before from an "external" box,
         # # terminate. The only allowed re-targetings are from inside the narrowest box yet
@@ -440,6 +443,7 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
             fmin = min(fmin, minimum(leaf.fvalues))
             childindex = findfirst(equalto(xt), leaf.xvalues)
             leaf = leaf.children[childindex]
+            isfinite(value(leaf)) || return false, fmin
             dims_targeted[imin] = true
         end
         return true, fmin
