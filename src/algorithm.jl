@@ -632,7 +632,7 @@ function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, a
         _, qn = sweep!(root, fc, x0, splits, lower, upper; extrapolate=extrapolate, fvalue=fvalue, nquasinewton=nquasinewton, kwargs...)
         used_quasinewton |= qn
         nquasinewton = qmodel_thresh[]
-        extrapolate = !extrapolate
+        # extrapolate = !extrapolate
         box = minimum(root)
         boxval = value(box)
         len = baseline_evals + fc.evals
