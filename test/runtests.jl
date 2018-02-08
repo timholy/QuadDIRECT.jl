@@ -324,7 +324,7 @@ end
     xmin, fmin = minimize(canyon, splits, lower, upper; atol=1e-3)
     @test fmin < 1e-10
     @test norm(xmin) < 1e-5
-    root, x0 = analyze(canyon, splits, lower, upper)
+    root, x0 = analyze(canyon, splits, lower, upper; atol=1e-3)
     @test length(leaves(root)) < 300
 end
 
@@ -341,7 +341,7 @@ end
     x = position(box, x0)
     @test x[2] <= -0.1
     @test value(box) < 0.01
-    @test fc.evals < 500
+    @test fc.evals < 700
     fc = QuadDIRECT.CountedFunction(canyonb)
     box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
     root = QuadDIRECT.get_root(box)
