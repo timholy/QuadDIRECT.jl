@@ -115,8 +115,10 @@ Base.parent(box::Box) = box.parent
 Base.ndims(box::Box{T,N}) where {T,N} = N
 Base.iteratorsize(::Type{<:Box}) = Base.SizeUnknown()
 
+abstract type WrappedFunction end
+
 # A function that keeps track of the number of evaluations
-mutable struct CountedFunction{F} <: Function
+mutable struct CountedFunction{F} <: WrappedFunction
     f::F
     evals::Int
 
@@ -128,6 +130,25 @@ function (f::CountedFunction{F})(x::AbstractVector) where F
     f.evals += 1
     return f.f(x)
 end
+
+numevals(f::CountedFunction) = f.evals
+
+# A function that keeps track of the number of evaluations
+mutable struct LoggedFunction{F} <: WrappedFunction
+    f::F
+    values::Vector{Float64}
+
+    LoggedFunction{F}(f) where F = new{F}(f, Float64[])
+end
+LoggedFunction(f::Function) = LoggedFunction{typeof(f)}(f)
+
+function (f::LoggedFunction{F})(x::AbstractVector) where F
+    val = f.f(x)
+    push!(f.values, val)
+    return val
+end
+
+numevals(f::LoggedFunction) = length(f.values)
 
 # Quadratic-model Incremental Gaussian Elimination
 struct QmIGE{T,N}

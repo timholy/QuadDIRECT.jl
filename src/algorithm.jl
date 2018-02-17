@@ -68,7 +68,7 @@ end
 # box suggests that one of its neighbors might be even lower,
 # recursively calls itself to split that box, too.
 # Returns `box, used_quasinewton`.
-function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, xtmp, splitdim, xsplitdefaults, lower, upper, minwidth, visited::Set) where T
+function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, xtmp, splitdim, xsplitdefaults, lower, upper, minwidth, visited::Set) where T
     box ∈ visited && error("already visited box")
     if !isleaf(box)
         # This box already got split along a different dimension
@@ -103,7 +103,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::CountedFunction, x0, 
     end
     bb = boxbounds(p)
     bb[2]-bb[1] >= minwidth[splitdim] || return (box, false, value(box))
-    if f.evals > qmodel_thresh[]     # make sure there is some excess
+    if numevals(f) > qmodel_thresh[]     # make sure there is some excess
         Q, xbase, c = build_quadratic_model(box, x0)
         if Q.nzrows[] == size(Q.coefs, 1)
             g, B = solve(Q)
@@ -612,7 +612,9 @@ end
 Further refinement of `root`. See [`analyze`](@ref) for details.
 """
 function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...)
-    fc = CountedFunction(f)
+    analyze!(root, CountedFunction(f), x0, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals, print_interval=print_interval, kwargs...)
+end
+function analyze!(root::Box, f::WrappedFunction, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...)
     box = minimum(root)
     boxval = value(box)
     lastval = typemax(boxval)
@@ -629,13 +631,13 @@ function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, a
     nquasinewton = 3*qnthresh(ndims(root))
     while boxval > fvalue && (tol_counter <= ndims(root) || !used_quasinewton) && len < maxevals
         lastval = boxval
-        _, qn = sweep!(root, fc, x0, splits, lower, upper; extrapolate=extrapolate, fvalue=fvalue, nquasinewton=nquasinewton, kwargs...)
+        _, qn = sweep!(root, f, x0, splits, lower, upper; extrapolate=extrapolate, fvalue=fvalue, nquasinewton=nquasinewton, kwargs...)
         used_quasinewton |= qn
         nquasinewton = qmodel_thresh[]
         # extrapolate = !extrapolate
         box = minimum(root)
         boxval = value(box)
-        len = baseline_evals + fc.evals
+        len = baseline_evals + numevals(f)
         len == lenold && break  # couldn't split any boxes
         lenold = len
         if len-lastprint > print_interval
