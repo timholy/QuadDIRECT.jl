@@ -1,4 +1,11 @@
-using GAMSParse, QuadDIRECT, ProgressMeter, Compat
+using GAMSFiles, QuadDIRECT, ProgressMeter, Compat
+
+struct ProblemInfo
+    smoothness::String
+    convexity::String
+    nvars::Int
+    minval::Float64
+end
 
 gamsdir = joinpath(@__DIR__, "gams")
 if !isdir(gamsdir)
@@ -37,12 +44,15 @@ if !isfile(answerfile)
 end
 answers_array = readdlm(answerfile, '\t')
 @assert(answers_array[1,2] == "problem")
+@assert(answers_array[1,3] == "smoothness")
+@assert(answers_array[1,4] == "convexity")
+@assert(answers_array[1,5] == "variables")
 @assert(answers_array[1,7] == "solution")
-answers = Dict{String,Float64}()
+answers = Dict{String,ProblemInfo}()
 for i = 2:size(answers_array, 1)
     prob = answers_array[i,2]
-    val = answers_array[i,7]
-    answers[prob] = val
+    info = ProblemInfo(answers_array[i,3], answers_array[i,4], answers_array[i,5], answers_array[i,7])
+    answers[prob] = info
 end
 
 function read_problemdata(file)
@@ -69,6 +79,7 @@ function read_problemdata(file)
 end
 
 stopping_criterion(v) = max(1.01*v, v+0.01)
+stopping_criterion(info::ProblemInfo) = stopping_criterion(info.minval)
 
 failures = String[]
 successes = Dict{String,Any}()
@@ -77,7 +88,7 @@ successes = Dict{String,Any}()
 excludes = ["nonconvex_smooth_gams/nnls.gms",
             "nonconvex_smooth_gams/chebyqad.gms"]
 
-mode = "eval"   # any choice other than "optimize" tests that the objective can be evaluated
+mode = "optimize"   # any choice other than "optimize" tests that the objective can be evaluated
 
 terminating = false
 for dir in gamsdirs
@@ -106,9 +117,9 @@ for dir in gamsdirs
                 f = getfield(mod, :objective)
                 # # FIXME: we need a better way of setting the splits
                 if mode == "optimize"
-                    fwrap = QuadDIRECT.CountedFunction(f)
+                    fwrap = LoggedFunction(f)
                     root, x0 = @eval analyze($fwrap, $x0, $lower, $upper; rtol=0, fvalue=stopping_criterion($(answers[basename])))
-                    successes[file] = (value(minimum(root)), fwrap.evals)
+                    successes[file] = fwrap.values
                 else
                     val = Base.invokelatest(f, x0)
                     if !isfinite(val)

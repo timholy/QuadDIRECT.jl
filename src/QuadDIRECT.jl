@@ -5,7 +5,9 @@ module QuadDIRECT
 using StaticArrays, PositiveFactorizations
 using Compat
 
-export Box, leaves, splitprint, splitprint_red, treeprint, value, analyze, analyze!, minimize
+export Box, CountedFunction, LoggedFunction
+export leaves, value, numevals, analyze, analyze!, minimize
+export splitprint, splitprint_red, treeprint
 
 include("types.jl")
 include("util.jl")

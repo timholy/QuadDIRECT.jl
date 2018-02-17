@@ -297,13 +297,13 @@ end
     lower, upper = [-2.75, -1.9], [3.0, 2.0]
     box, x0, xstar = QuadDIRECT.init(camel, splits, lower, upper)
     r1 = QuadDIRECT.get_root(box)
-    QuadDIRECT.sweep!(r1, QuadDIRECT.CountedFunction(camel), x0, splits, lower, upper)
+    QuadDIRECT.sweep!(r1, CountedFunction(camel), x0, splits, lower, upper)
 
     splits = ([-2, 0, 2], [-1, 0, 1])
     lower, upper = [-Inf, -Inf], [Inf, Inf]
     box, x0, xstar = QuadDIRECT.init(camel, splits, lower, upper)
     r2 = QuadDIRECT.get_root(box)
-    QuadDIRECT.sweep!(r2, QuadDIRECT.CountedFunction(camel), x0, splits, lower, upper)
+    QuadDIRECT.sweep!(r2, CountedFunction(camel), x0, splits, lower, upper)
 
     mn1, mx1 = extrema(r1)
     mn2, mx2 = extrema(r2)
@@ -332,31 +332,34 @@ end
     # Performance isn't great, but you can (if needed) return Inf as a way of imposing
     # additional constraints.
     # It would be better to have a more comprehensive solution.
-    canyonb(x) = x[2] > -0.1 ? Inf : canyon(x)
-    fc = QuadDIRECT.CountedFunction(canyonb)
-    splits = ([-11,-10,-9], [-7,-6,-5])
-    lower, upper = [-Inf, -Inf], [Inf, Inf]
-    root, x0 = analyze(fc, splits, lower, upper)
-    box = minimum(root)
-    x = position(box, x0)
-    @test x[2] <= -0.1
-    @test value(box) < 0.01
-    @test fc.evals < 700
-    fc = QuadDIRECT.CountedFunction(canyonb)
-    box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
-    root = QuadDIRECT.get_root(box)
-    iter = 0
-    while value(minimum(root)) > 0.1 && iter < 100
-        iter += 1
-        QuadDIRECT.sweep!(root, fc, x0, splits, lower, upper; nquasinewton=typemax(Int))
+    # Also use this to test both CountedFunction and WrappedFunction
+    for WF in (CountedFunction, LoggedFunction)
+        canyonb(x) = x[2] > -0.1 ? Inf : canyon(x)
+        fc = WF(canyonb)
+        splits = ([-11,-10,-9], [-7,-6,-5])
+        lower, upper = [-Inf, -Inf], [Inf, Inf]
+        root, x0 = analyze(fc, splits, lower, upper)
+        box = minimum(root)
+        x = position(box, x0)
+        @test x[2] <= -0.1
+        @test value(box) < 0.01
+        @test numevals(fc) < 700
+        fc = WF(canyonb)
+        box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
+        root = QuadDIRECT.get_root(box)
+        iter = 0
+        while value(minimum(root)) > 0.1 && iter < 100
+            iter += 1
+            QuadDIRECT.sweep!(root, fc, x0, splits, lower, upper; nquasinewton=typemax(Int))
+        end
+        @test iter < 100
+        @test numevals(fc) < 5000
+        fc = WF(canyonb)
+        splits = ([-2,-1,0], [-1, -0.5, -0.15])
+        root, x0 = analyze(fc, splits, lower, upper; fvalue=0.005, rtol=0, maxevals=10000)
+        @test numevals(fc) < 500
+        @test value(minimum(root)) < 0.005
     end
-    @test iter < 100
-    @test fc.evals < 5000
-    fc = QuadDIRECT.CountedFunction(canyonb)
-    splits = ([-2,-1,0], [-1, -0.5, -0.15])
-    root, x0 = analyze(fc, splits, lower, upper; fvalue=0.005, rtol=0, maxevals=10000)
-    @test fc.evals < 500
-    @test value(minimum(root)) < 0.005
 end
 
 @testset "High dimensional" begin
