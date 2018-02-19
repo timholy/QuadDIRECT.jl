@@ -63,27 +63,21 @@ Base.convert(::Type{MVector3}, a::AbstractVector{T}) where T =
 Base.similar(::MVector3{T}, ::Type{S}, dims::Tuple{Vararg{Int}}) where {T,S} =
     Array{S}(uninitialized, dims)
 
-boxtype(::Type{<:Integer}) = Float64
-boxtype(::Type{T}) where T = T
+boxeltype(::Type{<:Integer}) = Float64
+boxeltype(::Type{T}) where T = T
 
-# TODO
-# 1. Define the Box structure
-# 2. Define traversal routines for extracting 3-pt approximations along coordinate axes
-# 3. Define split routines
-# 4. Define outer API (iteration and termination criteria)
-# 5. Consider collecting enough points to build the full quadratic model
 mutable struct Box{T,N}
     parent::Box{T,N}
     parent_cindex::Int    # of its parent's children, which one is this?
     splitdim::Int         # the dimension along which this box has been split, or 0 if this is a leaf node
-    qtargeted::Bool       # true if the box has been targeted as a minimum by a full (dense) quadratic fit
+    qnconverged::Bool     # true if the box was the minimum-value box in a Quasi-Newton step and the improvement was within convergence criterion
     minmax::Tuple{T,T}    # the outer edges not corresponding to one of the parent's xvalues (splits that occur between dots in Fig 2)
     xvalues::MVector3{T}  # the values of x_splitdim at which f is evaluated
     fvalues::MVector3{T}  # the corresponding values of f
     children::MVector3{Box{T,N}}
 
     function default!(box::Box{T,N}) where {T,N}
-        box.qtargeted = false
+        box.qnconverged = false
         box.minmax = (typemax(T), typemin(T))
         box.xvalues = MVector3{T}(typemax(T), zero(T), typemin(T))
         box.fvalues = MVector3{T}(zero(T), zero(T), zero(T))

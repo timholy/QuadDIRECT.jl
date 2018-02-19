@@ -17,14 +17,14 @@ function init(f, xsplits, lower::AbstractVector, upper::AbstractVector)
         xsi = xsplits[i]
         Tx = promote_type(Tx, typeof(xsi[1]), typeof(xsi[2]), typeof(xsi[3]))
     end
-    Tx = boxtype(Tx)
+    Tx = boxeltype(Tx)
     x0 = Tx[x[2] for x in xsplits]
     box, xstar = _init(f, copy(x0), xsplits, lower, upper)
     box, x0, xstar
 end
 
 @noinline function _init(f, xstar, xsplits, lower, upper)
-    T = boxtype(promote_type(eltype(xstar), eltype(lower), eltype(upper)))
+    T = boxeltype(promote_type(eltype(xstar), eltype(lower), eltype(upper)))
     n = length(xstar)
     root = box = Box{T,n}()
     xtmp = copy(xstar)
@@ -397,18 +397,6 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
         # The new point should improve on what was already obtained in `leaf`
         ftarget < value(leaf) || return false, fmin
 
-        # # If leaf or one of its ancestors has been targeted before from an "external" box,
-        # # terminate. The only allowed re-targetings are from inside the narrowest box yet
-        # # targeted. This prevents running many line searches that all point to the same minimum.
-        # if leaf != box
-        #     dims_targeted = qtargeted(leaf, x, lower, upper)
-        #     if all(dims_targeted)
-        #         println("targeted ", xtarget, " with ", α)
-        #         iter == 1 && record_targeted!(mes, leaf, splitdim)
-        #         return false
-        #     end
-        # end
-
         # For consistency with the tree structure, we can change only one coordinate of
         # xleaf per split. Cycle through all coordinates, picking the one at each stage
         # that yields the smallest value as predicted by the quadratic model among the
@@ -416,7 +404,6 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
         dims_targeted = falses(ndims(leaf))
         q(x) = (x'*B*x)/2 + g'*x + c
         for j = 1:ndims(leaf)
-            leaf.qtargeted = true
             xleaf = position(leaf, x0)
             xtest = copy(xleaf)
             imin, qmin = 0, typemax(T)

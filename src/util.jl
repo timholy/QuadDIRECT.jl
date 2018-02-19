@@ -285,30 +285,6 @@ function find_smallest_child_leaf(box::Box)
 end
 
 """
-    dims_targeted = qtargeted(box, xsource, lower, upper)
-
-Returns coordinatewise `true` if `xsource` is external to an ancestor of `box`,
-split along the corresponding dimension, that has already been
-targeted as a minimum by a full quadratic model.
-"""
-function qtargeted(box, xsource, lower, upper)
-    bbs = boxbounds(box, lower, upper)
-    dims_targeted = falses(ndims(box))
-    while true
-        if box.qtargeted
-            if !isinside(xsource, bbs)
-                dims_targeted[box.splitdim] = true
-            end
-        end
-        isroot(box) && return dims_targeted
-        box = box.parent
-        if !isroot(box)
-            bbs[box.parent.splitdim] = boxbounds(box)
-        end
-    end
-end
-
-"""
     box = find_leaf_at(root, x)
 
 Return the leaf-node `box` that contains `x`.
