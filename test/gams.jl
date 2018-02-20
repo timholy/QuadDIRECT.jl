@@ -113,7 +113,11 @@ for dir in gamsdirs
             try
                 modex, axs = parsegams(Module, file)
                 x0g = axs[1]  # initialization provided by the file
-                mod = eval(modex)
+                if isdefined(Main, Symbol(basename))
+                    mod = getfield(Main, Symbol(basename))
+                else
+                    mod = eval(modex)
+                end
                 f = getfield(mod, :objective)
                 # # FIXME: we need a better way of setting the splits
                 if mode == "optimize"
