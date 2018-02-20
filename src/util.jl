@@ -850,8 +850,8 @@ end
 
 function is_different_basin(box1, box2, x0, lower, upper)
     # This convexity test has its limits: we're comparing the maximum along the secant
-    # within the box to a function value estimated from a diagonal quadratic model.
-    # False positives happen.
+    # within the box to a function value calculated at a point that isn't along the secant.
+    # False positives happen, but this is better than false negatives.
     root = get_root(box1)
     v1, v2 = value(box1), value(box2)
     x1, x2 = position(box1, x0), position(box2, x0)
@@ -864,9 +864,9 @@ function is_different_basin(box1, box2, x0, lower, upper)
     # exit condition even at first box, even though it's likely a false positive.
     vmax = v1 + t*(v2-v1)
     qdtot = oftype(vmax, 0)
-    for i = 1:ndims(leaf)
-        qdtot += qdelta(leaf, i)
-    end
+    # for i = 1:ndims(leaf)   # commented out to avoid false negatives
+    #     qdtot += qdelta(leaf, i)
+    # end
     if value(leaf)+qdtot > vmax
         return true
     end
@@ -891,9 +891,9 @@ function is_different_basin(box1, box2, x0, lower, upper)
             vmax = max(vmax, v1 + tnext*(v2-v1))
         end
         qdtot = oftype(vmax, 0)
-        for i = 1:ndims(leaf)
-            qdtot += qdelta(leaf, i)
-        end
+        # for i = 1:ndims(leaf)
+        #     qdtot += qdelta(leaf, i)
+        # end
         if value(leaf)+qdtot > vmax
             return true
         end

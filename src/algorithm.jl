@@ -616,7 +616,8 @@ function analyze!(root::Box, f::WrappedFunction, x0, splits, lower, upper; rtol=
         if nquasinewton < numevals(f) < maxevals && boxval > fvalue && !isempty(splitboxes)
             # determine which are in separate "basins" using a convexity test
             spbxs = sort(collect(splitboxes); by=value) # if unsorted, set hashing would introduce randomness
-            basinboxes = different_basins(spbxs, x0, lower, upper)
+            basinboxes = spbxs
+            # basinboxes = different_basins(spbxs, x0, lower, upper)
             for box in basinboxes
                 box.qnconverged && continue
                 isleaf(box) || continue
