@@ -171,7 +171,12 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
         end
         return box, minbox
     end
-    # Trisect
+    trisect!(box, f, xtmp, splitdim, bb, Δx, xcur, fcur)
+    trimschedule!(mes, box, splitdim, x0, lower, upper)
+    return box, minimum(box.fvalues)
+end
+
+function trisect!(box::Box{T}, f, xtmp, splitdim, bb, Δx, xcur, fcur) where T
     l, r = bb
     if isinf(l)
         l = r - 6*Δx  # gap is usually 1/3 of the box size, so undo this at the level of "box size"
@@ -188,8 +193,18 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
         c = xcur
     end
     split!(box, f, xtmp, splitdim, MVector3{T}(a, b, c), bb..., xcur, fcur)
-    trimschedule!(mes, box, splitdim, x0, lower, upper)
-    return box, minimum(box.fvalues)
+end
+
+function trisect!(box::Box, f, x0, splitdim)
+    xtmp = position(box, x0)
+    p = find_parent_with_splitdim(box, splitdim)
+    bb = boxbounds(p)
+    xp, fp = p.parent.xvalues, p.parent.fvalues
+    Δx = max(xp[2]-xp[1], xp[3]-xp[2])  # a measure of the "pragmatic" box scale even when the box is infinite
+    xcur = xp[p.parent_cindex]
+    @assert(xcur == xtmp[splitdim])
+    fcur = box.parent.fvalues[box.parent_cindex]
+    trisect!(box, f, xtmp, splitdim, bb, Δx, xcur, fcur)
 end
 
 ## Use regression to compute the best-fit quadratic model (with a dense Hessian)
@@ -340,7 +355,7 @@ function build_quadratic_model(box::Box{T,N}, x0) where {T,N}
         if j == cindex j+=1 end
         failed |= !descend!(Q, box.children[j], x0, xbase, c, xtmp, flag)
     end
-    return Q, xbase, c, !(failed || need_extra)
+    return Q, xbase, c, !failed
 end
 
 function descend!(Q, box, x0, xbase, c, Δx, flag, skip::Bool=false)
@@ -593,7 +608,7 @@ Further refinement of `root`. See [`analyze`](@ref) for details.
 function analyze!(root::Box, f::Function, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...)
     analyze!(root, CountedFunction(f), x0, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals, print_interval=print_interval, kwargs...)
 end
-function analyze!(root::Box, f::WrappedFunction, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...)
+function analyze!(root::Box{T}, f::WrappedFunction, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...) where T
     box = minimum(root)
     boxval = value(box)
     lastval = typemax(boxval)
@@ -607,7 +622,7 @@ function analyze!(root::Box, f::WrappedFunction, x0, splits, lower, upper; rtol=
     # The quasi-Newton step can reduce the function value so significantly, insist on
     # using it at least once.
     used_quasinewton = false
-    nquasinewton = 3*qnthresh(ndims(root))
+    nquasinewton = qnthresh(ndims(root))
     while boxval > fvalue && (tol_counter <= ndims(root) || !used_quasinewton) && len < maxevals
         lastval = boxval
         _, splitboxes = sweep!(root, f, x0, splits, lower, upper; extrapolate=extrapolate, fvalue=fvalue, kwargs...)
@@ -622,14 +637,97 @@ function analyze!(root::Box, f::WrappedFunction, x0, splits, lower, upper; rtol=
                 box.qnconverged && continue
                 isleaf(box) || continue
                 Q, xbase, c, success_build = build_quadratic_model(box, x0)
-                if success_build && Q.nzrows[] == size(Q.coefs, 1)
-                    g, B = solve(Q)
-                    leaf, minvalue, success_qn = quasinewton!(box, B, g, c, f, x0, lower, upper)
-                    used_quasinewton |= success_qn
-                    if success_qn
-                        boxvalue = value(box)
-                        if boxvalue - minvalue <= max(atol, rtol*(abs(boxvalue) + abs(minvalue)))
-                            box.qnconverged = leaf.qnconverged = true
+                # @show success_build
+                if success_build
+                    # Add more points, as needed, to fill in any missing rows from the regression
+                    xbox = position(box, x0)
+                    thresh = sqrt(eps(T))*maximum(abs.(diag(Q.coefs)))
+                    # @show Q.nzrows[] Q.dimpiv
+                    # @show size(Q.coefs, 1)
+                    nsmall = count(x->x<thresh, abs.(diag(Q.coefs)))
+                    while Q.nzrows[] < size(Q.coefs, 1) || nsmall > 0
+                        nzr, nsmallr = Q.nzrows[], nsmall
+                        idim, row = last_missing_dim(Q, thresh)
+                        # @show numevals(f)
+                        # @show idim row
+                        idim == 1 && display(Q.coefs[1:5, 1:5])
+                        missingdims = Set(Q.dimpiv[1:idim])
+                        # @show missingdims
+                        sbox = box
+                        while true
+                            delete!(missingdims, sbox.parent.splitdim)
+                            (isempty(missingdims) || isroot(sbox)) && break
+                            sbox = sbox.parent
+                            sbox.parent.splitdim ∈ missingdims || break
+                        end
+                        # @show missingdims
+                        # splitprint_red(root, box)
+                        # println()
+                        # splitprint_red(root, sbox)
+                        # println()
+                        while !isroot(sbox)
+                            j = 1
+                            if j == sbox.parent_cindex j += 1 end
+                            if !isleaf(sbox.parent.children[j])
+                                j += 1
+                                if j == sbox.parent_cindex j += 1 end
+                            end
+                            if isleaf(sbox.parent.children[j])
+                                sbox = sbox.parent.children[j]
+                                break
+                            end
+                            sbox = sbox.parent
+                        end
+                        restdims = setdiff(Set(Q.dimpiv[1:idim]), missingdims)
+                        for sd in missingdims
+                            xtmp = position(sbox, x0)
+                            trisect!(sbox, f, x0, sd)
+                            j = 1
+                            if sbox.xvalues[j] == xbox[sd] j += 1 end
+                            xtmp[sd] = sbox.xvalues[j]
+                            insert!(Q, xtmp-xbox, sbox.fvalues[j]-c, sd)
+                            j += 1
+                            if sbox.xvalues[j] == xbox[sd] j += 1 end
+                            xtmp[sd] = sbox.xvalues[j]
+                            insert!(Q, xtmp-xbox, sbox.fvalues[j]-c, sd)
+                            sbox = sbox.children[j]
+                        end
+                        for i = idim-1:-1:1
+                            sd = Q.dimpiv[i]
+                            sd ∈ restdims || continue
+                            xtmp = position(sbox, x0)
+                            trisect!(sbox, f, x0, sd)
+                            j = 1
+                            if sbox.xvalues[j] == xbox[sd] j += 1 end
+                            xtmp[sd] = sbox.xvalues[j]
+                            insert!(Q, xtmp-xbox, sbox.fvalues[j]-c, sd)
+                            j += 1
+                            if sbox.xvalues[j] == xbox[sd] j += 1 end
+                            xtmp[sd] = sbox.xvalues[j]
+                            insert!(Q, xtmp-xbox, sbox.fvalues[j]-c, sd)
+                            sbox = sbox.children[j]
+                        end
+                        # @show Q.nzrows[] nzr minimum(abs.(diag(Q.coefs))) thresh
+                        nsmall = count(x->x<thresh, abs.(diag(Q.coefs)))
+                        if !(Q.nzrows[] > nzr || nsmall < nsmallr)
+                            @show Q.nzrows[] size(Q.coefs,1) nsmall
+                        end
+                        @assert(Q.nzrows[] > nzr || nsmall < nsmallr)  # insist on progress
+                        # @show Q.nzrows[] numevals(f)
+                        # _, rownext = last_missing_dim(Q, thresh)
+                        # @assert rownext < row
+                    end
+                    # @show Q.nzrows[] size(Q.coefs, 1) minimum(abs.(diag(Q.coefs))) thresh
+                    if Q.nzrows[] == size(Q.coefs, 1) && minimum(abs.(diag(Q.coefs))) >= thresh
+                        g, B = solve(Q)
+                        leaf, minvalue, success_qn = quasinewton!(box, B, g, c, f, x0, lower, upper)
+                        used_quasinewton |= success_qn
+                        minvalue < fvalue && break
+                        if success_qn
+                            boxvalue = value(box)
+                            if boxvalue - minvalue <= max(atol, rtol*(abs(boxvalue) + abs(minvalue)))
+                                box.qnconverged = leaf.qnconverged = true
+                            end
                         end
                     end
                 end

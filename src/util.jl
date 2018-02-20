@@ -919,3 +919,37 @@ function pick3(a, b, bb)
     end
     return a, b, c = lohi(a, b, (imin+imax)/2)
 end
+
+function first_missing_dim(Q::QmIGE{T,N}, thresh, kstart=1) where {T,N}
+    dimpiv, rowzero = Q.dimpiv, Q.rowzero
+    k = 0
+    for i = 1:N
+        di = dimpiv[i]
+        # gradient eq
+        rowzero[k+=1] && k >= kstart && return i, k
+        abs(Q.coefs[k,k]) < thresh && return i, k
+        # B eqs
+        for j = 1:i
+            rowzero[k+=1] && k >= kstart && return i, k
+            abs(Q.coefs[k,k]) < thresh && return i, k
+        end
+    end
+    return 0, k+1
+end
+
+function last_missing_dim(Q::QmIGE{T,N}, thresh) where {T,N}
+    dimpiv, rowzero = Q.dimpiv, Q.rowzero
+    k = length(rowzero) + 1
+    for i = N:-1:1
+        di = dimpiv[i]
+        # gradient eq
+        rowzero[k-=1] && return i, k
+        abs(Q.coefs[k,k]) < thresh && return i, k
+        # B eqs
+        for j = 1:i
+            rowzero[k-=1] && return i, k
+            abs(Q.coefs[k,k]) < thresh && return i, k
+        end
+    end
+    return 0, 0
+end
