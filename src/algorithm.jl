@@ -378,6 +378,7 @@ function quasinewton!(box::Box{T}, B, g, c, f, x0, lower, upper, itermax = 20) w
     iter = 0 # the above weren't "real" iterations, so reset
     root = get_root(box)
     # Do a backtracking linesearch
+    local xtarget, ftarget
     while iter < itermax
         iter += 1
         xtarget = x + α*Δx
@@ -385,57 +386,56 @@ function quasinewton!(box::Box{T}, B, g, c, f, x0, lower, upper, itermax = 20) w
         # while preserving the box structure would take ndims(box)-1 additional
         # evaluations, which is not worth it unless xtarget itself is an improvement.
         ftarget = f(xtarget)
-        if ftarget > fbox
-            α /= 2
+        ftarget < fbox && break
+        α /= 2
+    end
+    ftarget < fbox || return box, fmin, false
+
+    leaf = find_leaf_at(root, xtarget)
+    isfinite(value(leaf)) || return box, fmin, false
+    # The new point should improve on what was already obtained in `leaf`
+    if ftarget >= value(leaf) || leaf.qnconverged
+        leaf.qnconverged = true
+        return box, fmin, false
+    end
+
+    # For consistency with the tree structure, we can change only one coordinate of
+    # xleaf per split. Cycle through all coordinates, picking the one at each stage
+    # that yields the smallest value as predicted by the quadratic model among the
+    # not-yet-selected coordinates.
+    dims_targeted = falses(ndims(leaf))
+    q(x) = (x'*B*x)/2 + g'*x + c
+    for j = 1:ndims(leaf)
+        xleaf = position(leaf, x0)
+        xtest = copy(xleaf)
+        imin, qmin = 0, typemax(T)
+        for i = 1:ndims(leaf)
+            dims_targeted[i] && continue
+            xtest = replacecoordinate!(xtest, i, xtarget[i])
+            qx = q(xtest)
+            if qx < qmin
+                qmin = qx
+                imin = i
+            end
+        end
+        bb = boxbounds(leaf, imin, lower, upper)
+        xcur = xleaf[imin]
+        xt = ensure_distinct(xtarget[imin], xcur, bb)
+        a, b, c = pick3(xcur, xt, bb)
+        if a == b || b == c
+            # The box might be so narrow that there are not enough distinct floating-point
+            # numbers that lie between the bounds.
+            dims_targeted[imin] = true
             continue
         end
-        leaf = find_leaf_at(root, xtarget)
-        isfinite(value(leaf)) || return box, fmin, false
-        # The new point should improve on what was already obtained in `leaf`
-        if ftarget >= value(leaf) || leaf.qnconverged
-            leaf.qnconverged = true
-            return box, fmin, false
-        end
-
-        # For consistency with the tree structure, we can change only one coordinate of
-        # xleaf per split. Cycle through all coordinates, picking the one at each stage
-        # that yields the smallest value as predicted by the quadratic model among the
-        # not-yet-selected coordinates.
-        dims_targeted = falses(ndims(leaf))
-        q(x) = (x'*B*x)/2 + g'*x + c
-        for j = 1:ndims(leaf)
-            xleaf = position(leaf, x0)
-            xtest = copy(xleaf)
-            imin, qmin = 0, typemax(T)
-            for i = 1:ndims(leaf)
-                dims_targeted[i] && continue
-                xtest = replacecoordinate!(xtest, i, xtarget[i])
-                qx = q(xtest)
-                if qx < qmin
-                    qmin = qx
-                    imin = i
-                end
-            end
-            bb = boxbounds(leaf, imin, lower, upper)
-            xcur = xleaf[imin]
-            xt = ensure_distinct(xtarget[imin], xcur, bb)
-            a, b, c = pick3(xcur, xt, bb)
-            if a == b || b == c
-                # The box might be so narrow that there are not enough distinct floating-point
-                # numbers that lie between the bounds.
-                dims_targeted[imin] = true
-                continue
-            end
-            split!(leaf, f, xleaf, imin, MVector3{T}(a, b, c), bb..., xleaf[imin], value(leaf))
-            fmin = min(fmin, minimum(leaf.fvalues))
-            childindex = findfirst(equalto(xt), leaf.xvalues)
-            leaf = leaf.children[childindex]
-            isfinite(value(leaf)) || return leaf, fmin, false
-            dims_targeted[imin] = true
-        end
-        return leaf, fmin, true
+        split!(leaf, f, xleaf, imin, MVector3{T}(a, b, c), bb..., xleaf[imin], value(leaf))
+        fmin = min(fmin, minimum(leaf.fvalues))
+        childindex = findfirst(equalto(xt), leaf.xvalues)
+        leaf = leaf.children[childindex]
+        isfinite(value(leaf)) || return leaf, fmin, false
+        dims_targeted[imin] = true
     end
-    return box, fmin, false
+    return leaf, fmin, true
 end
 
 # A dumb O(N) algorithm for building the minimum-edge structures
