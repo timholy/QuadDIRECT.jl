@@ -363,17 +363,19 @@ end
 end
 
 @testset "High dimensional" begin
-    B = randn(41, 40); B = B'*B
+    Bfact = randn(21, 20)
+    B = Bfact'*Bfact
     D, V = eig(B)
     i = 1
-    while D[i] < 1e-4*D[end]
-        D[i] = 1e-4*D[end]
+    while D[i] < 1e-3*D[end]
+        D[i] = 1e-3*D[end]
+        i += 1
     end
-    B = V*Diagonal(sqrt.(D)); B = B'*B
+    B = Diagonal(sqrt.(D))*V'; B = B'*B
     h(x) = (x'*B*x)/2
     splits = [[-3,-2,-1] for i = 1:size(B,1)]
     upper = fill(Inf, size(B,1))
     lower = -upper
-    root, x0 = analyze(h, splits, lower, upper; maxevals=10000, fvalue=1e-3)
+    root, x0 = analyze(h, splits, lower, upper; maxevals=10^6, fvalue=1e-3)
     @test value(minimum(root)) <= 1e-3
 end

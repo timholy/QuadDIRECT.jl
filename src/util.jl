@@ -37,9 +37,9 @@ function qfit(xfm, xf0, xfp)
 end
 
 @inline function lagrangecoefs(xfm, xf0, xfp)
-    xm, fm = xfm
-    x0, f0 = xf0
-    xp, fp = xfp
+    xm, fm = xfm.first, xfm.second
+    x0, f0 = xf0.first, xf0.second
+    xp, fp = xfp.first, xfp.second
     @assert(xp > x0 && x0 > xm && isfinite(xm) && isfinite(xp))
     cm = fm/((xm-x0)*(xm-xp))  # coefficients of Lagrange polynomial
     c0 = f0/((x0-xm)*(x0-xp))
@@ -117,7 +117,7 @@ Remove entries from `mel` that are worse than `(w, label=>fvalue)`.
 Returns linked-list positions on either side of the putative new value.
 """
 function trim!(mel::MELink, w, lf::Pair)
-    l, f = lf
+    l, f = lf.first, lf.second
     prev, next = mel, mel.next
     while prev != next && w > next.w
         if f <= next.f
@@ -269,12 +269,12 @@ function find_parent_with_splitdim(box::Box, splitdim::Integer)
 end
 
 """
-    box = find_smallest_child_leaf(root)
+    box = greedy_smallest_child_leaf(root)
 
 Walk the tree recursively, choosing the child with smallest function value at each stage.
 `box` will be a leaf node.
 """
-function find_smallest_child_leaf(box::Box)
+function greedy_smallest_child_leaf(box::Box)
     # Not guaranteed to be the smallest function value, it's the smallest that can be
     # reached stepwise
     while !isleaf(box)
@@ -282,6 +282,25 @@ function find_smallest_child_leaf(box::Box)
         box = box.children[idx]
     end
     box
+end
+
+function find_smallest_child_leaf(box::Box)
+    vmin, boxmin = value(box), box
+    for leaf in leaves(box)
+        vleaf = value(leaf)
+        if vleaf <= vmin
+            vmin, boxmin = vleaf, leaf
+        end
+    end
+    return boxmin
+end
+
+function unique_smallest_leaves(boxes)
+    uboxes = Set{eltype(boxes)}()
+    for box in boxes
+        push!(uboxes, find_smallest_child_leaf(box))
+    end
+    return uboxes
 end
 
 """
@@ -330,7 +349,7 @@ This is a useful utility for finding the neighbor of a given box. Example:
     lnbr = find_leaf_at_edge(root, x, i, -1)
 """
 function find_leaf_at_edge(root::Box, x, splitdim::Integer, dir::Signed)
-    isleaf(root) && return root
+    isleaf(root) && return root, false
     while !isleaf(root)
         i = root.splitdim
         found = false
@@ -682,6 +701,7 @@ end
 
 function up(box, root)
     local i
+    box == root && return (box, length(box.children)+1)
     while true
         box, i = box.parent, box.parent_cindex+1
         box == root && return (box, i)
@@ -809,6 +829,67 @@ function pathlength_hyperplane_intersect(x0, dx, xtarget, tmax)
         end
     end
     t, intersectdim
+end
+
+function different_basins(boxes::AbstractVector{B}, x0, lower, upper) where B<:Box
+    basinboxes = B[]
+    for box in boxes
+        ubasin = true
+        for bbox in basinboxes
+            if !is_different_basin(box, bbox, x0, lower, upper)
+                ubasin = false
+                break
+            end
+        end
+        if ubasin
+            push!(basinboxes, box)
+        end
+    end
+    return basinboxes
+end
+
+function is_different_basin(box1, box2, x0, lower, upper)
+    root = get_root(box1)
+    v1, v2 = value(box1), value(box2)
+    x1, x2 = position(box1, x0), position(box2, x0)
+    dx = x2 - x1
+    bb = boxbounds(box1, lower, upper)
+    flag = Vector{Bool}(uninitialized, length(lower))
+    leaf = box1
+    t, exitdim = pathlength_box_exit(x1, dx, bb)
+    while t < 1
+        x2[:] .= x1 .+ t.*dx
+        x2[exitdim] = bb[exitdim][dx[exitdim] > 0 ? 2 : 1]  # avoid roundoff error in the critical coordinate
+        leaf_old = leaf
+        leaf, success = find_leaf_at_edge(root, x2, exitdim, dx[exitdim] > 0 ? +1 : -1)
+        success || break
+        boxbounds!(bb, flag, leaf, lower, upper)
+        tnext, exitdim = pathlength_box_exit(x1, dx, bb)
+        tnext = max(tnext, t)
+        while tnext == t  # must have hit a corner
+            tnext += oftype(t, 1e-4)
+            x2[:] .= x1 .+ tnext.*dx
+            bxtmp = find_leaf_at(root, x2)
+            boxbounds!(bb, flag, bxtmp, lower, upper)
+            tnext, exitdim = pathlength_box_exit(x1, dx, bb)
+        end
+        vmax = v1 + t*(v2-v1)
+        if tnext < 1
+            vmax = max(vmax, v1 + tnext*(v2-v1))
+        end
+        # This convexity test has its limits: we're comparing the maximum along the secant
+        # within the box to a function value estimated from a diagonal quadratic model.
+        # False positives happen.
+        qdtot = oftype(vmax, 0)
+        for i = 1:ndims(leaf)
+            qdtot += qdelta(leaf, i)
+        end
+        if value(leaf)+qdtot > vmax
+            return true
+        end
+        t = tnext
+    end
+    return false
 end
 
 """

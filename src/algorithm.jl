@@ -1,5 +1,3 @@
-const qmodel_thresh = Ref(0)
-
 function init(f, xsplits, lower::AbstractVector, upper::AbstractVector)
     # Validate the inputs
     n = length(lower)
@@ -67,7 +65,7 @@ end
 # Splits a box. If the "tilt" over the domain of the
 # box suggests that one of its neighbors might be even lower,
 # recursively calls itself to split that box, too.
-# Returns `box, used_quasinewton`.
+# Returns `box, minval`.
 function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, xtmp, splitdim, xsplitdefaults, lower, upper, minwidth, visited::Set) where T
     box ∈ visited && error("already visited box")
     if !isleaf(box)
@@ -99,23 +97,10 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
         xcur, fcur = x0[splitdim], box.parent.fvalues[box.parent_cindex]
         split!(box, f, xtmp, splitdim, xsplitdefault, lwr, upr, xcur, fcur)
         trimschedule!(mes, box, splitdim, x0, lower, upper)
-        return box, false, minimum(box.fvalues)
+        return box, minimum(box.fvalues)
     end
     bb = boxbounds(p)
-    bb[2]-bb[1] >= minwidth[splitdim] || return (box, false, value(box))
-    if numevals(f) > qmodel_thresh[]     # make sure there is some excess
-        Q, xbase, c = build_quadratic_model(box, x0)
-        if Q.nzrows[] == size(Q.coefs, 1)
-            g, B = solve(Q)
-            success, minvalue = quasinewton!(box, mes, B, g, c, f, x0, splitdim, lower, upper)
-            # `box` itself might not have been split, if the Newton estimate was in
-            # a different leaf.
-            # Since `box` got queued, we shouldn't return until it's been split
-            !isleaf(box) && return (box, success, minvalue)
-        else
-            qmodel_thresh[] *= 2
-        end
-    end
+    bb[2]-bb[1] >= minwidth[splitdim] || return (box, value(box))
     xp, fp = p.parent.xvalues, p.parent.fvalues
     Δx = max(xp[2]-xp[1], xp[3]-xp[2])  # a measure of the "pragmatic" box scale even when the box is infinite
     xcur = xp[p.parent_cindex]
@@ -159,7 +144,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
             add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
                           MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
             trimschedule!(mes, box, splitdim, x0, lower, upper)
-            return box, false, minimum(box.fvalues)
+            return box, minimum(box.fvalues)
         end
         # xvert is not in the box. Prepare to split the neighbor, but for this box
         # just bisect xcur and xnew
@@ -176,10 +161,15 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
         add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
                     MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
         trimschedule!(mes, box, splitdim, x0, lower, upper)
+        minbox = minimum(box.fvalues)
         if !success || nbr ∈ visited || !isfinite(value(nbr))
-            return (box, false, minimum(box.fvalues)) # check nbr ∈ visited to avoid cycles
+            return (box, minbox) # check nbr ∈ visited to avoid cycles
         end
-        return autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, minwidth, push!(visited, box))
+        nbr, mv = autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, minwidth, push!(visited, box))
+        if mv < minbox
+            return nbr, mv
+        end
+        return box, minbox
     end
     # Trisect
     l, r = bb
@@ -199,7 +189,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
     end
     split!(box, f, xtmp, splitdim, MVector3{T}(a, b, c), bb..., xcur, fcur)
     trimschedule!(mes, box, splitdim, x0, lower, upper)
-    return box, false, minimum(box.fvalues)
+    return box, minimum(box.fvalues)
 end
 
 ## Use regression to compute the best-fit quadratic model (with a dense Hessian)
@@ -327,27 +317,34 @@ function build_quadratic_model(box::Box{T,N}, x0) where {T,N}
     xbase = position(box, x0)
     xtmp = similar(xbase)
     flag = similar(xtmp, Bool)
+    failed = false
     if !isleaf(box)
         for i = 1:3
-            descend!(Q, box.children[i], x0, xbase, c, xtmp, flag)
+            failed |= !descend!(Q, box.children[i], x0, xbase, c, xtmp, flag)
         end
     end
-    while Q.nzrows[] < length(Q.rhs) && !isroot(box)
+    # To increase the numeric stability of the result, we do more boxes than
+    # nominally needed (see the `swap` portion of `insert!`)
+    need_extra = true
+    while !failed && (Q.nzrows[] < length(Q.rhs) || need_extra) && !isroot(box)
+        if Q.nzrows[] == length(Q.rhs)
+            need_extra = minimum(abs.(diag(Q.coefs))) < sqrt(eps(T)) * maximum(abs.(diag(Q.coefs)))
+        end
         cindex = box.parent_cindex
         box = box.parent
-        all(isfinite, box.fvalues) || break
+        failed |= !all(isfinite, box.fvalues)
         j = 1
         if j == cindex j+=1 end
-        descend!(Q, box.children[j], x0, xbase, c, xtmp, flag)
+        failed |= !descend!(Q, box.children[j], x0, xbase, c, xtmp, flag)
         j += 1
         if j == cindex j+=1 end
-        descend!(Q, box.children[j], x0, xbase, c, xtmp, flag)
+        failed |= !descend!(Q, box.children[j], x0, xbase, c, xtmp, flag)
     end
-    return Q, xbase, c
+    return Q, xbase, c, !(failed || need_extra)
 end
 
 function descend!(Q, box, x0, xbase, c, Δx, flag, skip::Bool=false)
-    Q.nzrows[] == length(Q.rhs) && return Q
+    Q.nzrows[] == length(Q.rhs) && return true
     position!(Δx, flag, box, x0)
     thisx = isleaf(box) ? zero(eltype(Δx)) : Δx[box.splitdim]
     if !skip
@@ -359,17 +356,17 @@ function descend!(Q, box, x0, xbase, c, Δx, flag, skip::Bool=false)
     if !isleaf(box)
         iskip = findfirst(equalto(thisx), box.xvalues)
         for i = 1:3
-            descend!(Q, box.children[i], x0, xbase, c, Δx, flag, i==iskip)
+            descend!(Q, box.children[i], x0, xbase, c, Δx, flag, i==iskip) || return false
         end
     end
-    return Q
+    return true
 end
 
-function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, itermax = 20) where T
+function quasinewton!(box::Box{T}, B, g, c, f, x0, lower, upper, itermax = 20) where T
     fbox = fmin = value(box)
-    isfinite(fbox) || return false, fmin
+    isfinite(fbox) || return box, fmin, false
     cB = cholfact(Positive, B)
-    Δx = -(cB \ g)
+    Δx = -(cB \ g)  # TODO: incorporate the bounds
     α = T(1.0)
     x = position(box, x0)
     iter = 0
@@ -377,7 +374,7 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
         α /= 2
         iter += 1
     end
-    iter == itermax && return false, fmin
+    iter == itermax && return box, fmin, false
     iter = 0 # the above weren't "real" iterations, so reset
     root = get_root(box)
     # Do a backtracking linesearch
@@ -393,9 +390,12 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
             continue
         end
         leaf = find_leaf_at(root, xtarget)
-        isfinite(value(leaf)) || return false, fmin
+        isfinite(value(leaf)) || return box, fmin, false
         # The new point should improve on what was already obtained in `leaf`
-        ftarget < value(leaf) || return false, fmin
+        if ftarget >= value(leaf) || leaf.qnconverged
+            leaf.qnconverged = true
+            return box, fmin, false
+        end
 
         # For consistency with the tree structure, we can change only one coordinate of
         # xleaf per split. Cycle through all coordinates, picking the one at each stage
@@ -430,16 +430,13 @@ function quasinewton!(box::Box{T}, mes, B, g, c, f, x0, splitdim, lower, upper, 
             fmin = min(fmin, minimum(leaf.fvalues))
             childindex = findfirst(equalto(xt), leaf.xvalues)
             leaf = leaf.children[childindex]
-            isfinite(value(leaf)) || return false, fmin
+            isfinite(value(leaf)) || return leaf, fmin, false
             dims_targeted[imin] = true
         end
-        return true, fmin
+        return leaf, fmin, true
     end
-    return false, fmin
+    return box, fmin, false
 end
-
-# Might want to add leaf to mes?
-record_targeted!(mes, leaf, splitdim) = nothing
 
 # A dumb O(N) algorithm for building the minimum-edge structures
 # For large trees, this is the bottleneck
@@ -489,20 +486,16 @@ function mesprint(mes)
     nothing
 end
 
-function sweep!(root::Box, f, x0, splits, lower, upper; extrapolate::Bool = true, fvalue=-Inf, nquasinewton=3*qnthresh(ndims(root)), minwidth=zeros(eltype(x0), ndims(root)))
+function sweep!(root::Box, f, x0, splits, lower, upper; extrapolate::Bool = true, fvalue=-Inf, minwidth=zeros(eltype(x0), ndims(root)))
     mes = minimum_edges(root, x0, lower, upper, minwidth; extrapolate=extrapolate)
-    sweep!(root, mes, f, x0, splits, lower, upper; fvalue=fvalue, nquasinewton=nquasinewton, minwidth=minwidth)
+    sweep!(root, mes, f, x0, splits, lower, upper; fvalue=fvalue, minwidth=minwidth)
 end
-function sweep!(root::Box{T}, mes::Vector{<:MELink}, f, x0, splits, lower, upper; fvalue=-Inf, nquasinewton=3*qnthresh(ndims(root)), minwidth=zeros(eltype(x0), ndims(root))) where T
+function sweep!(root::Box{T}, mes::Vector{<:MELink}, f, x0, splits, lower, upper; fvalue=-Inf, minwidth=zeros(eltype(x0), ndims(root))) where T
     xtmp = similar(x0)
     flag = similar(x0, Bool)
     nsplits = similar(x0, Int)
-    nleaves0 = count(x->true, leaves(root))
-    nprocessed = 0
-    used_quasinewton = false
-    N = ndims(root)
-    qmodel_thresh[] = nquasinewton  # number of points needed for quasi-Newton approach
     visited = Set{typeof(root)}()
+    splitboxes = Set{typeof(root)}()
     dimorder = sortperm(length.(mes))  # process the dimensions with the shortest queues first
     fvalueT = T(fvalue)
     for i in dimorder
@@ -510,6 +503,7 @@ function sweep!(root::Box{T}, mes::Vector{<:MELink}, f, x0, splits, lower, upper
         while !isempty(me)
             item = popfirst!(me)
             box = item.l
+            box.qnconverged && continue
             bb = boxbounds(find_parent_with_splitdim(box, i), lower[i], upper[i])
             bb[2]-bb[1] < minwidth[i] && continue
             position!(xtmp, flag, box)
@@ -519,15 +513,13 @@ function sweep!(root::Box{T}, mes::Vector{<:MELink}, f, x0, splits, lower, upper
                 # println("discarding ", box, " along dimension ", i)
                 continue
             end
-            nprocessed += 1
             empty!(visited)
-            _, qn, minval = autosplit!(box, mes, f, x0, xtmp, i, splits, lower, upper, minwidth, visited)
-            used_quasinewton |= qn
-            minval <= fvalueT && return root, used_quasinewton
+            finalbox, minval = autosplit!(box, mes, f, x0, xtmp, i, splits, lower, upper, minwidth, visited)
+            push!(splitboxes, finalbox)
+            minval <= fvalueT && return root, unique_smallest_leaves(splitboxes)
         end
     end
-    # println(nprocessed, " processed, starting with ", nleaves0, " leaves and ending with ", count(x->true, leaves(root)))
-    root, used_quasinewton
+    root, unique_smallest_leaves(splitboxes)
 end
 
 """
@@ -618,12 +610,34 @@ function analyze!(root::Box, f::WrappedFunction, x0, splits, lower, upper; rtol=
     nquasinewton = 3*qnthresh(ndims(root))
     while boxval > fvalue && (tol_counter <= ndims(root) || !used_quasinewton) && len < maxevals
         lastval = boxval
-        _, qn = sweep!(root, f, x0, splits, lower, upper; extrapolate=extrapolate, fvalue=fvalue, nquasinewton=nquasinewton, kwargs...)
-        used_quasinewton |= qn
-        nquasinewton = qmodel_thresh[]
-        # extrapolate = !extrapolate
+        _, splitboxes = sweep!(root, f, x0, splits, lower, upper; extrapolate=extrapolate, fvalue=fvalue, kwargs...)
         box = minimum(root)
         boxval = value(box)
+        if nquasinewton < numevals(f) < maxevals && boxval > fvalue && !isempty(splitboxes)
+            # determine which are in separate "basins" using a convexity test
+            basinboxes = different_basins(collect(splitboxes), x0, lower, upper)
+            for box in basinboxes
+                box.qnconverged && continue
+                isleaf(box) || continue
+                Q, xbase, c, success_build = build_quadratic_model(box, x0)
+                if success_build && Q.nzrows[] == size(Q.coefs, 1)
+                    g, B = solve(Q)
+                    leaf, minvalue, success_qn = quasinewton!(box, B, g, c, f, x0, lower, upper)
+                    used_quasinewton |= success_qn
+                    if success_qn
+                        boxvalue = value(box)
+                        if boxvalue - minvalue <= max(atol, rtol*(abs(boxvalue) + abs(minvalue)))
+                            box.qnconverged = leaf.qnconverged = true
+                        end
+                    end
+                end
+            end
+            if !used_quasinewton
+                nquasinewton *= 2
+            end
+            box = minimum(root)
+            boxval = value(box)
+        end
         len = baseline_evals + numevals(f)
         len == lenold && break  # couldn't split any boxes
         lenold = len

@@ -37,6 +37,7 @@ mutable struct MVector3{T} <: AbstractVector{T}
 end
 Base.IndexStyle(::Type{<:MVector3}) = IndexLinear()
 Base.size(v::MVector3) = (3,)
+Base.indices1(v::MVector3) = Base.OneTo(3)
 function Base.getindex(v::MVector3, i::Int)
     @boundscheck ((1 <= i) & (i <= 3)) || Base.throw_boundserror(v, i)
     ifelse(i == 1, v.x1, ifelse(i == 2, v.x2, v.x3))
@@ -52,6 +53,7 @@ function Base.setindex!(v::MVector3, val, i::Int)
     end
     v
 end
+Base.convert(::Type{MVector3{T}}, a::MVector3{T}) where T = a
 function Base.convert(::Type{MVector3{T}}, a::AbstractVector) where T
     @boundscheck indices(a) == (Base.OneTo(3),) || throw(DimensionMismatch("vector must have length 3"))
     @inbounds ret = MVector3{T}(a[1], a[2], a[3])
