@@ -849,6 +849,9 @@ function different_basins(boxes::AbstractVector{B}, x0, lower, upper) where B<:B
 end
 
 function is_different_basin(box1, box2, x0, lower, upper)
+    # This convexity test has its limits: we're comparing the maximum along the secant
+    # within the box to a function value estimated from a diagonal quadratic model.
+    # False positives happen.
     root = get_root(box1)
     v1, v2 = value(box1), value(box2)
     x1, x2 = position(box1, x0), position(box2, x0)
@@ -857,6 +860,16 @@ function is_different_basin(box1, box2, x0, lower, upper)
     flag = Vector{Bool}(uninitialized, length(lower))
     leaf = box1
     t, exitdim = pathlength_box_exit(x1, dx, bb)
+    # For consistency (e.g., commutivity with box1 and box2), we have to check
+    # exit condition even at first box, even though it's likely a false positive.
+    vmax = v1 + t*(v2-v1)
+    qdtot = oftype(vmax, 0)
+    for i = 1:ndims(leaf)
+        qdtot += qdelta(leaf, i)
+    end
+    if value(leaf)+qdtot > vmax
+        return true
+    end
     while t < 1
         x2[:] .= x1 .+ t.*dx
         x2[exitdim] = bb[exitdim][dx[exitdim] > 0 ? 2 : 1]  # avoid roundoff error in the critical coordinate
@@ -877,9 +890,6 @@ function is_different_basin(box1, box2, x0, lower, upper)
         if tnext < 1
             vmax = max(vmax, v1 + tnext*(v2-v1))
         end
-        # This convexity test has its limits: we're comparing the maximum along the secant
-        # within the box to a function value estimated from a diagonal quadratic model.
-        # False positives happen.
         qdtot = oftype(vmax, 0)
         for i = 1:ndims(leaf)
             qdtot += qdelta(leaf, i)
