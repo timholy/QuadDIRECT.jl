@@ -81,6 +81,20 @@ end
 stopping_criterion(v) = max(1.01*v, v+0.01)
 stopping_criterion(info::ProblemInfo) = stopping_criterion(info.minval)
 
+# Debugging utility: run a single GAMS file
+function gams1(filename::AbstractString; kwargs...)
+    dirname, fname = splitdir(filename)
+    basename, ext = splitext(fname)
+    lower, upper, x0 = read_problemdata(joinpath(gamsdir, "problemdata", basename)*".problem.data")
+    gams = parsegams(filename)
+    modex, axs = parsegams(Module, basename, gams)
+    mod = eval(modex)
+    f = getfield(mod, :objective)
+    fwrap = LoggedFunction(f)
+    root, x0 = @eval analyze($fwrap, $x0, $lower, $upper; rtol=0, fvalue=stopping_criterion($(answers[basename])), $(kwargs...))
+    return root, x0, fwrap
+end
+
 failures = String[]
 successes = Dict{String,Any}()
 
@@ -113,7 +127,11 @@ for dir in gamsdirs
             try
                 modex, axs = parsegams(Module, file)
                 x0g = axs[1]  # initialization provided by the file
-                mod = eval(modex)
+                if isdefined(Main, Symbol(basename))
+                    mod = getfield(Main, Symbol(basename))
+                else
+                    mod = eval(modex)
+                end
                 f = getfield(mod, :objective)
                 # # FIXME: we need a better way of setting the splits
                 if mode == "optimize"
