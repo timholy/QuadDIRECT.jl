@@ -338,7 +338,7 @@ end
         fc = WF(canyonb)
         splits = ([-11,-10,-9], [-7,-6,-5])
         lower, upper = [-Inf, -Inf], [Inf, Inf]
-        root, x0 = analyze(fc, splits, lower, upper)
+        root, x0 = analyze(fc, splits, lower, upper; rtol=0, fvalue=0.01)
         box = minimum(root)
         x = position(box, x0)
         @test x[2] <= -0.1
@@ -350,7 +350,7 @@ end
         iter = 0
         while value(minimum(root)) > 0.1 && iter < 100
             iter += 1
-            QuadDIRECT.sweep!(root, fc, x0, splits, lower, upper; nquasinewton=typemax(Int))
+            QuadDIRECT.sweep!(root, fc, x0, splits, lower, upper)
         end
         @test iter < 100
         @test numevals(fc) < 5000
