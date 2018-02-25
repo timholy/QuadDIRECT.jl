@@ -7,10 +7,11 @@ using Compat
 
 export Box, CountedFunction, LoggedFunction
 export leaves, value, numevals, analyze, analyze!, minimize
-export splitprint, splitprint_red, treeprint
+export splitprint, splitprint_colored, treeprint
 
 include("types.jl")
 include("util.jl")
+include("quadratic_model.jl")
 include("algorithm.jl")
 
 # Convenience methods
@@ -20,11 +21,11 @@ function analyze(f, x0::AbstractVector{<:Real}, lower::AbstractVector{<:Real}, u
     splits = similar(x0, Vector{Float64})
     for i in inds
         lo, hi, xi = lower[i], upper[i], x0[i]
-        lo = max(xi-1, lo)
-        hi = min(xi+1, hi)
-        if lo == xi || hi == xi
-            xi = (lo+hi)/2
-        end
+        @assert(lo<=xi<=hi)
+        lo = max(xi-1, (xi+lo)/2)
+        hi = min(xi+1, (xi+hi)/2)
+        xi = xi == lo ? (xi+hi)/2 :
+             xi == hi ? (xi+lo)/2 : xi
         @assert(lo < xi < hi)
         @assert isfinite(lo) && isfinite(xi) && isfinite(hi)
         splits[i] = [lo, xi, hi]
