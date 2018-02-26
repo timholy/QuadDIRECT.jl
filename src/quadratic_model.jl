@@ -189,7 +189,15 @@ function complete_quadratic_model!(Q::QmIGE, c, box::Box{T,N}, f::Function, x0, 
                     end
                 end
                 xcur = xtmp[splitdim]
-                insrows, rboxn = split_insert!(Q, rbox, row:rowoffset+idim+1, f, xbase, c, xtmp, splitdim, scale, splits, lower, upper)
+                p = find_parent_with_splitdim(rbox, splitdim)
+                # Check that the box is big enough to split along this dimension
+                if !isroot(p)
+                    bb = boxbounds(p)
+                    if !(bb[2] - bb[1] > epswidth(bb))
+                        return Q  # fail (FIXME?)
+                    end
+                end
+                insrows, rboxn = split_insert!(Q, rbox, p, row:rowoffset+idim+1, f, xbase, c, xtmp, splitdim, scale, splits, lower, upper)
                 if Qd == 0 && (maximum(insrows) != row || Q.coefs[row,row] == 0)
                     # Debugging
                     println("Something went wrong")
@@ -215,12 +223,11 @@ function complete_quadratic_model!(Q::QmIGE, c, box::Box{T,N}, f::Function, x0, 
     return Q
 end
 
-function split_insert!(Q, rbox::Box{T}, rng, f, xbase, c, xtmp, splitdim, scale, splits, lower, upper) where T
+function split_insert!(Q, rbox::Box{T}, p, rng, f, xbase, c, xtmp, splitdim, scale, splits, lower, upper) where T
     debug = false
     debug && @show rng
     row = first(rng)
     xcur = xtmp[splitdim]
-    p = find_parent_with_splitdim(rbox, splitdim)
     if isroot(p)
         xsplit = MVector3{T}(splits[splitdim])
         @assert(xsplit[1] < xsplit[2] < xsplit[3])

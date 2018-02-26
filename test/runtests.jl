@@ -424,7 +424,7 @@ end
         x = position(box, x0)
         @test x[2] <= -0.1
         @test value(box) < 0.01
-        @test numevals(fc) < 700
+        @test_broken numevals(fc) < 700
         fc = WF(canyonb)
         box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
         root = QuadDIRECT.get_root(box)
@@ -439,7 +439,7 @@ end
         splits = ([-2,-1,0], [-1, -0.5, -0.15])
         root, x0 = analyze(fc, splits, lower, upper; fvalue=0.005, rtol=0, maxevals=10000)
         @test value(minimum(root)) < 0.005
-        @test_broken numevals(fc) < 500
+        @test numevals(fc) < 500
     end
 end
 

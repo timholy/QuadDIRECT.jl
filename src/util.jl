@@ -582,6 +582,12 @@ function within(x::Real, bb::Tuple{Real,Real}, dir)
     return true
 end
 
+function epswidth(bb::Tuple{T,T}) where T<:Real
+    w1 = isfinite(bb[1]) ? eps(bb[1]) : T(0)
+    w2 = isfinite(bb[2]) ? eps(bb[2]) : T(0)
+    return 10*min(w1, w2)
+end
+
 function count_splits(box::Box)
     nsplits = Vector{Int}(uninitialized, ndims(box))
     count_splits!(nsplits, box)

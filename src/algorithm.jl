@@ -101,7 +101,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
         return box, minimum(box.fvalues)
     end
     bb = boxbounds(p)
-    bb[2]-bb[1] >= minwidth[splitdim] || return (box, value(box))
+    bb[2]-bb[1] > max(minwidth[splitdim], epswidth(bb)) || return (box, value(box))
     xp, fp = p.parent.xvalues, p.parent.fvalues
     Δx = max(xp[2]-xp[1], xp[3]-xp[2])  # a measure of the "pragmatic" box scale even when the box is infinite
     xcur = xp[p.parent_cindex]
@@ -160,7 +160,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
         fmid = f(xtmp)
         xf1, xf2, xf3 = order_pairs(xcur=>fcur, xnew=>fnew, xmid=>fmid)
         add_children!(box, splitdim, MVector3{T}(xf1[1], xf2[1], xf3[1]),
-                    MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
+                      MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
         trimschedule!(mes, box, splitdim, x0, lower, upper)
         minbox = minimum(box.fvalues)
         if !success || nbr ∈ visited || !isfinite(value(nbr)) || length(visited) > ndims(box)
@@ -174,7 +174,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
     end
     trisect!(box, f, xtmp, splitdim, bb, Δx, xcur, fcur)
     trimschedule!(mes, box, splitdim, x0, lower, upper)
-    return box, minimum(box.fvalues)
+    return box, isleaf(box) ? value(box) : minimum(box.fvalues)
 end
 
 function trisect!(box::Box{T}, f, xtmp, splitdim, bb, Δx, xcur, fcur) where T
@@ -193,7 +193,10 @@ function trisect!(box::Box{T}, f, xtmp, splitdim, bb, Δx, xcur, fcur) where T
     else
         c = xcur
     end
-    split!(box, f, xtmp, splitdim, MVector3{T}(a, b, c), bb..., xcur, fcur)
+    if a < b < c
+        return split!(box, f, xtmp, splitdim, MVector3{T}(a, b, c), bb..., xcur, fcur)
+    end
+    return box
 end
 
 # This requires there to be a (non-root) parent split along splitdim
@@ -382,6 +385,7 @@ function minimum_edges(root::Box{T,N}, x0, lower, upper, minwidth=zeros(eltype(x
 end
 
 function trimschedule!(mes::Vector{<:MELink}, box::Box, splitdim, x0, lower, upper)
+    isleaf(box) && return mes
     for child in box.children
         fval = child.parent.fvalues[child.parent_cindex]
         for i = 1:ndims(box)
@@ -637,8 +641,8 @@ end
 Return the position `xmin` and value `fmin` of the minimum of `f` over the specified domain.
 See [`analyze`](@ref) for information about the input arguments.
 """
-function minimize(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
-    root, x0 = analyze(f, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals)
+function minimize(f, splits, lower, upper; kwargs...)
+    root, x0 = analyze(f, splits, lower, upper; kwargs...)
     box = minimum(root)
     return position(box, x0), value(box)
 end
