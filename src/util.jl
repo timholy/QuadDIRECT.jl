@@ -308,6 +308,11 @@ function greedy_smallest_child_leaf(box::Box)
     box
 end
 
+"""
+    box = find_smallest_child_leaf(root)
+
+Return the node below `root` with smallest function value.
+"""
 function find_smallest_child_leaf(box::Box)
     vmin, boxmin = value(box), box
     for leaf in leaves(box)
@@ -524,6 +529,17 @@ function boxbounds!(bb, flag, box::Box, lower, upper)
     boxbounds!(bb, flag, box)
 end
 
+"""
+    scale = boxscale(box, splits)
+
+Return a vector containing a robust measure of the "scale" of `box` along
+each coordinate axis. Specifically, it is typically related to the gap between
+evaluation points of its parent boxes, falling back on the initial user-supplied `splits`
+if it hasn't been split along a particular axis.
+
+Note that a box that extends to infinity still has a finite `scale`. Moreover, a box
+where one evaluation point is at the edge has a scale bigger than zero.
+"""
 function boxscale(box::Box{T,N}, splits) where {T,N}
     bxscale(s1, s2, s3) = s1 == s2 ? s3 - s2 :
                           s2 == s3 ? s2 - s1 :
@@ -620,6 +636,14 @@ function Base.extrema(root::Box)
 end
 
 ## Utilities for experimenting with topology of the tree
+"""
+    splitprint([io::IO], box)
+
+Print a representation of all boxes below `box`, using parentheses prefaced by a number `n`
+to denote a split along dimension `n`, and `l` to represent a leaf.
+
+See also [`parse`](@ref) for the inverse: converting a string representation to a tree of boxes.
+"""
 function splitprint(io::IO, box::Box)
     if isleaf(box)
         print(io, 'l')
@@ -635,6 +659,12 @@ function splitprint(io::IO, box::Box)
 end
 splitprint(box::Box) = splitprint(STDOUT, box)
 
+"""
+    splitprint_colored([io::IO], box, innerbox)
+
+Like [`splitprint`](@ref), except that `innerbox` is highlighted in red, and the chain
+of parents of `innerbox` are highlighted in cyan.
+"""
 function splitprint_colored(io::IO, box::Box, thisbox::Box, allparents=get_allparents(thisbox))
     if isleaf(box)
         box == thisbox ? print_with_color(:light_red, io, 'l') : print(io, 'l')
@@ -667,6 +697,12 @@ function get_allparents(box)
     allparents
 end
 
+"""
+    root = parse(Box{T,N}, string)
+
+Parse a `string`, in the output format of [`splitprint`](@ref), and generate
+a tree of boxes with that structure.
+"""
 function Base.parse(::Type{B}, str::AbstractString) where B<:Box
     b = B()
     splitbox!(b, str)
@@ -707,6 +743,12 @@ function splitbox!(box::Box, str::AbstractString)
 end
 
 ## Tree traversal
+
+"""
+    root = get_root(box)
+
+Return the root node for `box`.
+"""
 function get_root(box::Box)
     while !isroot(box)
         box = parent(box)
@@ -896,76 +938,76 @@ function pathlength_hyperplane_intersect(x0, dx, xtarget, tmax)
     t, intersectdim
 end
 
-function different_basins(boxes::AbstractVector{B}, x0, lower, upper) where B<:Box
-    basinboxes = B[]
-    for box in boxes
-        ubasin = true
-        for bbox in basinboxes
-            if !is_different_basin(box, bbox, x0, lower, upper)
-                ubasin = false
-                break
-            end
-        end
-        if ubasin
-            push!(basinboxes, box)
-        end
-    end
-    return basinboxes
-end
+# function different_basins(boxes::AbstractVector{B}, x0, lower, upper) where B<:Box
+#     basinboxes = B[]
+#     for box in boxes
+#         ubasin = true
+#         for bbox in basinboxes
+#             if !is_different_basin(box, bbox, x0, lower, upper)
+#                 ubasin = false
+#                 break
+#             end
+#         end
+#         if ubasin
+#             push!(basinboxes, box)
+#         end
+#     end
+#     return basinboxes
+# end
 
-function is_different_basin(box1, box2, x0, lower, upper)
-    # This convexity test has its limits: we're comparing the maximum along the secant
-    # within the box to a function value calculated at a point that isn't along the secant.
-    # False positives happen, but this is better than false negatives.
-    root = get_root(box1)
-    v1, v2 = value(box1), value(box2)
-    x1, x2 = position(box1, x0), position(box2, x0)
-    dx = x2 - x1
-    bb = boxbounds(box1, lower, upper)
-    flag = Vector{Bool}(uninitialized, length(lower))
-    leaf = box1
-    t, exitdim = pathlength_box_exit(x1, dx, bb)
-    # For consistency (e.g., commutivity with box1 and box2), we have to check
-    # exit condition even at first box, even though it's likely a false positive.
-    vmax = v1 + t*(v2-v1)
-    qdtot = oftype(vmax, 0)
-    # for i = 1:ndims(leaf)   # commented out to avoid false negatives
-    #     qdtot += qdelta(leaf, i)
-    # end
-    if value(leaf)+qdtot > vmax
-        return true
-    end
-    while t < 1
-        x2[:] .= x1 .+ t.*dx
-        x2[exitdim] = bb[exitdim][dx[exitdim] > 0 ? 2 : 1]  # avoid roundoff error in the critical coordinate
-        leaf_old = leaf
-        leaf, success = find_leaf_at_edge(root, x2, exitdim, dx[exitdim] > 0 ? +1 : -1)
-        success || break
-        boxbounds!(bb, flag, leaf, lower, upper)
-        tnext, exitdim = pathlength_box_exit(x1, dx, bb)
-        tnext = max(tnext, t)
-        while tnext == t  # must have hit a corner
-            tnext += oftype(t, 1e-4)
-            x2[:] .= x1 .+ tnext.*dx
-            bxtmp = find_leaf_at(root, x2)
-            boxbounds!(bb, flag, bxtmp, lower, upper)
-            tnext, exitdim = pathlength_box_exit(x1, dx, bb)
-        end
-        vmax = v1 + t*(v2-v1)
-        if tnext < 1
-            vmax = max(vmax, v1 + tnext*(v2-v1))
-        end
-        qdtot = oftype(vmax, 0)
-        # for i = 1:ndims(leaf)
-        #     qdtot += qdelta(leaf, i)
-        # end
-        if value(leaf)+qdtot > vmax
-            return true
-        end
-        t = tnext
-    end
-    return false
-end
+# function is_different_basin(box1, box2, x0, lower, upper)
+#     # This convexity test has its limits: we're comparing the maximum along the secant
+#     # within the box to a function value calculated at a point that isn't along the secant.
+#     # False positives happen, but this is better than false negatives.
+#     root = get_root(box1)
+#     v1, v2 = value(box1), value(box2)
+#     x1, x2 = position(box1, x0), position(box2, x0)
+#     dx = x2 - x1
+#     bb = boxbounds(box1, lower, upper)
+#     flag = Vector{Bool}(uninitialized, length(lower))
+#     leaf = box1
+#     t, exitdim = pathlength_box_exit(x1, dx, bb)
+#     # For consistency (e.g., commutivity with box1 and box2), we have to check
+#     # exit condition even at first box, even though it's likely a false positive.
+#     vmax = v1 + t*(v2-v1)
+#     qdtot = oftype(vmax, 0)
+#     # for i = 1:ndims(leaf)   # commented out to avoid false negatives
+#     #     qdtot += qdelta(leaf, i)
+#     # end
+#     if value(leaf)+qdtot > vmax
+#         return true
+#     end
+#     while t < 1
+#         x2[:] .= x1 .+ t.*dx
+#         x2[exitdim] = bb[exitdim][dx[exitdim] > 0 ? 2 : 1]  # avoid roundoff error in the critical coordinate
+#         leaf_old = leaf
+#         leaf, success = find_leaf_at_edge(root, x2, exitdim, dx[exitdim] > 0 ? +1 : -1)
+#         success || break
+#         boxbounds!(bb, flag, leaf, lower, upper)
+#         tnext, exitdim = pathlength_box_exit(x1, dx, bb)
+#         tnext = max(tnext, t)
+#         while tnext == t  # must have hit a corner
+#             tnext += oftype(t, 1e-4)
+#             x2[:] .= x1 .+ tnext.*dx
+#             bxtmp = find_leaf_at(root, x2)
+#             boxbounds!(bb, flag, bxtmp, lower, upper)
+#             tnext, exitdim = pathlength_box_exit(x1, dx, bb)
+#         end
+#         vmax = v1 + t*(v2-v1)
+#         if tnext < 1
+#             vmax = max(vmax, v1 + tnext*(v2-v1))
+#         end
+#         qdtot = oftype(vmax, 0)
+#         # for i = 1:ndims(leaf)
+#         #     qdtot += qdelta(leaf, i)
+#         # end
+#         if value(leaf)+qdtot > vmax
+#             return true
+#         end
+#         t = tnext
+#     end
+#     return false
+# end
 
 """
     a, b, c = pick3(a, b, (lower::Real, upper::Real))

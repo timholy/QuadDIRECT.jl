@@ -26,6 +26,17 @@ function solve(Q::QmIGE{T,N}) where {T,N}
 end
 
 # Uses available points to set up the regression problem
+"""
+    Q = build_quadratic_model(box, x0, scale, thresh)
+
+Start building a quadratic model of the function, using points already stored
+in the tree that contains `box`. `scale` (see [`boxscale`](@ref)) is used in part to
+ensure numeric stability, and will prevent inclusion of points that are too distant along
+any coordinate axis.
+
+`Q` is not guaranteed to be complete; the tree may not contain enough points, or enough
+"independent" points, to determine all the parameters of `Q`. See also [`complete_quadratic_model!`](@ref).
+"""
 function build_quadratic_model(box::Box{T,N}, x0, scale, thresh) where {T,N}
     Q = QmIGE{T,N}()
     c = value(box)
@@ -46,7 +57,7 @@ function build_quadratic_model(box::Box{T,N}, x0, scale, thresh) where {T,N}
     need_extra = true
     while succeeded && (Q.nzrows[] < length(Q.rhs) || need_extra) && !isroot(box)
         if Q.nzrows[] == length(Q.rhs)
-            need_extra = minimum(abs.(diag(Q.coefs))) < sqrt(eps(T))  # because of scaling this doesn't need units
+            need_extra = minimum(abs.(diag(Q.coefs))) < thresh  # because of scaling this doesn't need units
         end
         cindex = box.parent_cindex
         box = box.parent
@@ -64,6 +75,16 @@ function build_quadratic_model(box::Box{T,N}, x0, scale, thresh) where {T,N}
 end
 
 # Evaluates the function at new points until the quadratic model is fully specified
+"""
+    complete_quadratic_model!(Q::QmIGE, c, box::Box, f::Function, x0, xbase, scale, splits, lower::AbstractVector, upper::AbstractVector, thresh)
+
+Split boxes in the tree containing `box` until all the parameters of the quadratic model can
+be determined. It is allowed to fail if one or more boxes are too small to be split further,
+so it is advisable to check that all diagonal coefficients in `Q` exceed `thresh` before
+proceeding.
+
+See also [`solve`](@ref).
+"""
 function complete_quadratic_model!(Q::QmIGE, c, box::Box{T,N}, f::Function, x0, xbase, scale, splits, lower::AbstractVector, upper::AbstractVector, thresh) where {T,N}
     @assert(all(x->x>0, Q.dimpiv))
     xtmp  = similar(x0)
@@ -154,7 +175,6 @@ function complete_quadratic_model!(Q::QmIGE, c, box::Box{T,N}, f::Function, x0, 
                         # There's no displacement in the gradient coordinate, so obviously
                         # we have to split it
                         splitdim = dimpiv[idim]
-                        println("fastpath ", splitdim)
                     else
                         # Here it's not so obvious which coordinate we need to split.
                         # To avoid the risk of failure, we check the result of the gaussian

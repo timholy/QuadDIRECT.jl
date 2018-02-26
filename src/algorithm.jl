@@ -443,7 +443,7 @@ function sweep!(root::Box{T}, mes::Vector{<:MELink}, f, x0, splits, lower, upper
 end
 
 """
-    root, x0 = analyze(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+    root, x0 = analyze(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, nquasinewton=<auto>, minwidth=zeros(length(splits)), print_interval=typemax(Int))
 
 Analyze the behavior of `f`, searching for minima, over the rectangular box specified by
 `lower` and `upper` (`lower[i] <= x[i] <= upper[i]`). The bounds may be infinite.
@@ -454,10 +454,29 @@ axis at which to potentially evaluate `f`; the values must be in increasing orde
 `x0` contains the initial evaluation point, the position constructed from the middle value
 of `splits` in each dimension.
 
-`rtol` and `atol` represent relative and
-absolute, respectively, changes in minimum function value required for the exploration
-to terminate. (These limits must be hit on `ndims` successive sweeps.) Alternatively,
-the analysis is terminated if the function value is ever reduced below `fvalue`.
+There are several keywords which can be important:
+
+- `rtol` and `atol` represent relative and absolute, respectively, changes in minimum
+  function value required for the exploration to terminate. (These limits must be hit on
+  `ndims` successive sweeps.)
+  Alternatively, the analysis is terminated if the function
+  value is ever reduced below `fvalue`. The combination `rtol=0, fvalue=<user-supplied-value>`
+  can be especially useful in benchmarking situations in which you know the value of the
+  global minimum; it will force the algorithm to keep trying until it reaches `fvalue`,
+  or until it exceeds the maximum number of allowed function evaluations.
+- `maxevals` allows you to control the maximum number of function evaluations that the
+  algorithm is permitted to use. The actual number may be a bit higher, as the criterion
+  is not checked while, e.g., in the middle of a splitting-sweep or a quasi-Newton step.
+- `nquasinewton` is the number of "explore" function evaluations required before attempting
+  the first quasi-Newton step. The default value is the minimum number of evaluations
+  required to estimate the parameters of a quadratic model, `(N+1)*(N+2)÷2` in `N` dimensions.
+  Using a higher number may encourage the algorithm to spend more time "exploring" before
+  thoroughly "exploiting" the most promising leads so far.
+- `minwidth[i]` sets the minimum box size along dimension `i`. This is not strictly enforced,
+  but boxes that become smaller will not be split during "explore" (sweep) phases of the algorithm.
+  You can use this to improve coverage of space when you know that some parameter-value
+  changes are too small to lead to measurable improvements.
+- setting `print_interval` displays a small amount of information about progress.
 
 # Example:
 
@@ -474,39 +493,33 @@ the analysis is terminated if the function value is ever reduced below `fvalue`.
     splits = ([-11,-10,-9], [-7,-6,-5])
 
     # Since this problem has a minimum value of 0, relying on `rtol` is not ideal
-    # (it takes quite a few iterations), so specify an absolute tolerance.
-    julia> root, x0 = analyze(canyon, splits, lower, upper; atol=0.01)  # low-precision solution
+    # (it's possible to make infinitesimal relative improvements nearly forever),
+    # so specify an absolute tolerance.
+    julia> root, x0 = analyze(canyon, splits, lower, upper; atol=0.01)
     (BoxRoot@[NaN, NaN], [-10.0, -6.0])
 
     julia> box = minimum(root)
-    Box0.015220406463743074@[0.192158, 0.19604]
+    Box1.9407745316864587e-25@[-6.94556e-13, -6.98108e-13]
 
     julia> value(box)
-    0.015220406463743074
+    1.9407745316864587e-25
 
     julia> position(box, x0)
     2-element Array{Float64,1}:
-    0.192158
-    0.19604
-
-    # Now a higher-precision solution
-    julia> root, x0 = analyze(canyon, splits, lower, upper; atol=1e-5)
-    (BoxRoot@[NaN, NaN], [-10.0, -6.0])
-
-    julia> box = minimum(root)
-    Box2.7058500379897107e-6@[-0.0025621, -0.00261386]
+     -6.94556e-13
+     -6.98108e-13
 
 See also [`minimize`](@ref).
 """
-function analyze(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500, print_interval=typemax(Int), kwargs...)
+function analyze(f, splits, lower, upper; kwargs...)
     box, x0 = init(f, splits, lower, upper)
     root = get_root(box)
-    analyze!(root, f, x0, splits, lower, upper; rtol=rtol, atol=atol, fvalue=fvalue, maxevals=maxevals, print_interval=print_interval, kwargs...)
+    analyze!(root, f, x0, splits, lower, upper; kwargs...)
     return root, x0
 end
 
 """
-    root = analyze!(root, f, x0, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+    root = analyze!(root, f, x0, splits, lower, upper; kwargs...)
 
 Further refinement of `root`. See [`analyze`](@ref) for details.
 """
@@ -636,7 +649,7 @@ function analyze!(root::Box{T}, f::WrappedFunction, x0, splits, lower, upper; rt
 end
 
 """
-    xmin, fmin = minimize(f, splits, lower, upper; rtol=1e-3, atol=0.0, fvalue=-Inf, maxevals=2500)
+    xmin, fmin = minimize(f, splits, lower, upper; kwargs...)
 
 Return the position `xmin` and value `fmin` of the minimum of `f` over the specified domain.
 See [`analyze`](@ref) for information about the input arguments.
