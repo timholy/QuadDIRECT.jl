@@ -163,7 +163,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
                     MVector3{T}(xf1[2], xf2[2], xf3[2]), lwr, upr)
         trimschedule!(mes, box, splitdim, x0, lower, upper)
         minbox = minimum(box.fvalues)
-        if !success || nbr ∈ visited || !isfinite(value(nbr))
+        if !success || nbr ∈ visited || !isfinite(value(nbr)) || length(visited) > ndims(box)
             return (box, minbox) # check nbr ∈ visited to avoid cycles
         end
         nbr, mv = autosplit!(nbr, mes, f, x0, position(nbr, x0), 0, xsplitdefaults, lower, upper, minwidth, push!(visited, box))
