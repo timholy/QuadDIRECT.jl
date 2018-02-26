@@ -1,6 +1,20 @@
 using QuadDIRECT, StaticArrays
 using Base.Test
 
+@testset "Bounded least squares" begin
+    B = [1 -0.2; -0.2 2]
+    f = [-15.0,7.0]
+    xunc = -B\f
+    x = QuadDIRECT.lls_bounded(B, f, [-1,-1], [1,1])
+    @test x ≈ [1,-1]
+    x = QuadDIRECT.lls_bounded(B, f, [-10,-3], [10,3])
+    @test x ≈ [10,-2.5]
+    x = QuadDIRECT.lls_bounded(B, f, [-15,-1], [15,1])
+    @test x ≈ [14.8,-1]
+    x = QuadDIRECT.lls_bounded(B, f, [-15,-3], [15,3])
+    @test x ≈ xunc
+end
+
 @testset "MinimumEdge" begin
     me = QuadDIRECT.MELink{Float64,Float64}('z')
     insert!(me, 1, 'a'=>1)
@@ -382,6 +396,17 @@ end
     @test norm(xmin) < 1e-5
     root, x0 = analyze(canyon, splits, lower, upper; atol=1e-3)
     @test length(leaves(root)) < 300
+end
+
+@testset "Meaningful bounds" begin
+    fc = CountedFunction(canyon)
+    splits = ([-11,-10,-9], [-7,-6,-5])
+    lower, upper = [-Inf, -Inf], [Inf, -0.1]
+    root, x0 = analyze(fc, splits, lower, upper)
+    box = minimum(root)
+    x = position(box, x0)
+    @test x[2] ≈ -0.1
+    @test numevals(fc) < 1000
 end
 
 @testset "Infinite return values" begin

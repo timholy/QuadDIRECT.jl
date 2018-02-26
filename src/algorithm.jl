@@ -209,10 +209,15 @@ end
 
 # Returns target box, value, and α. Uses α=0 to signal failure.
 function quasinewton!(box::Box{T}, B, g, c, scale, f::Function, x0, lower, upper, itermax = 20) where T
+    x = position(box, x0)
     fbox = fmin = value(box)
     isfinite(fbox) || return box, fmin, T(0)
+    # Solve the bounded linear least-squares problem forcing B to be positive-definite
     cB = cholfact(Positive, B)
-    Δx = -(cB \ g)  # TODO: incorporate the bounds
+    Δx = -(cB \ g)   # unconstrained solution
+    lsc, usc = (lower.-x)./scale, (upper.-x)./scale
+    Δx[:] .= clamp.(Δx, lsc, usc)
+    Δx = lls_bounded!(Δx, full(cB), g, lsc, usc)
     # Test whether the update moves the point appreciably. If not, mark this point
     # as converged.
     issame = true
@@ -226,7 +231,6 @@ function quasinewton!(box::Box{T}, B, g, c, scale, f::Function, x0, lower, upper
     Δx[:] .= Δx .* scale
 
     α = T(1.0)
-    x = position(box, x0)
     iter = 0
     while !isinside(x + α*Δx, lower, upper) && iter < itermax
         α /= 2
@@ -297,6 +301,56 @@ function quasinewton!(box::Box{T}, B, g, c, scale, f::Function, x0, lower, upper
         dims_targeted[imin] = true
     end
     return leaf, fmin, α
+end
+
+# Linear least squares with box-bounds. From
+#    Sequential Coordinate-wise Algorithm for the
+#    Non-negative Least Squares Problem
+#    Vojtˇch e Franc, V ́clav aHlav ́ acˇ, and Mirko Navara
+# Solves min(x'*H*x/2 + f'*x) over the domain bounded by lower and upper
+function lls_bounded(H::AbstractMatrix{T}, f::VT, lower::V, upper::V, tol = sqrt(eps(T))) where {T,VT<:AbstractVector{T},V<:AbstractVector}
+    x = clamp.(-H \ f, lower, upper)
+    lls_bounded!(x, H, f, lower, upper, zeros(T, length(f)), tol)
+    return x
+end
+
+lls_bounded!(x::VT, H::AbstractMatrix{T}, f::VT, lower::V, upper::V, tol = sqrt(eps(T))) where {T,VT<:AbstractVector{T},V<:AbstractVector} =
+    lls_bounded!(x, H, f, lower, upper, zeros(T, length(f)), tol)
+
+function lls_bounded!(x::VT, H::AbstractMatrix{T}, f::VT, lower::V, upper::V, g::VT, tol = sqrt(eps(T))) where {T,VT<:AbstractVector{T},V<:AbstractVector}
+    assert_oneindexed(A) = @assert(all(r->first(r)==1, Compat.axes(A)))
+    assert_oneindexed(x); assert_oneindexed(H); assert_oneindexed(f); assert_oneindexed(lower)
+    assert_oneindexed(upper); assert_oneindexed(g)
+    m, n = size(H)
+    m == n || error("H must be square")
+    length(f) == n || error("Mismatch between H and f")
+    length(g) == n || error("Mismatch between H and g")
+    niter = 0
+    while niter <= 1000
+        # Once per iter, calculate gradient freshly to avoid accumulation of roundoff
+        A_mul_B!(g, H, x)
+        for i = 1:n
+            g[i] += f[i]
+        end
+        xchange = zero(T)
+        for k = 1:n
+            xold = x[k]
+            xnew = clamp(xold - g[k]/H[k,k], lower[k], upper[k])
+            x[k] = xnew
+            dx = xnew-xold
+            xchange = max(xchange, abs(dx))
+            if dx != 0
+                for i = 1:n
+                    g[i] += dx*H[i,k]
+                end
+            end
+        end
+        if xchange < tol
+            break
+        end
+        niter += 1
+    end
+    x
 end
 
 # A dumb O(N) algorithm for building the minimum-edge structures
