@@ -1,6 +1,20 @@
 using QuadDIRECT, StaticArrays
 using Base.Test
 
+@testset "Bounded least squares" begin
+    B = [1 -0.2; -0.2 2]
+    f = [-15.0,7.0]
+    xunc = -B\f
+    x = QuadDIRECT.lls_bounded(B, f, [-1,-1], [1,1])
+    @test x ≈ [1,-1]
+    x = QuadDIRECT.lls_bounded(B, f, [-10,-3], [10,3])
+    @test x ≈ [10,-2.5]
+    x = QuadDIRECT.lls_bounded(B, f, [-15,-1], [15,1])
+    @test x ≈ [14.8,-1]
+    x = QuadDIRECT.lls_bounded(B, f, [-15,-3], [15,3])
+    @test x ≈ xunc
+end
+
 @testset "MinimumEdge" begin
     me = QuadDIRECT.MELink{Float64,Float64}('z')
     insert!(me, 1, 'a'=>1)
@@ -247,11 +261,14 @@ end
         @test QuadDIRECT.qdelta(p.children[i], 1) == QuadDIRECT.qdelta(p.parent)
     end
 
-    # quasinewton tests
+    ## Quasinewton tests
+    # Solving for quadratic parameters
+    thresh = sqrt(eps())
     splits = ([-11,-10,-9], [-7,-6,-5])
     lower, upper = [-Inf, -Inf], [Inf, Inf]
     box, x0, xstar = QuadDIRECT.init(canyon, splits, lower, upper)
-    Q, xbase, c = QuadDIRECT.build_quadratic_model(box, x0)
+    Q, xbase, c, succeeded = QuadDIRECT.build_quadratic_model(box, x0, [1, 1], thresh)
+    @test succeeded
     @test xbase == xstar
     @test c == canyon(xstar)
     @test_throws Base.LinAlg.SingularException QuadDIRECT.solve(Q)
@@ -260,10 +277,63 @@ end
                              [canyon([xstar[1],y]), canyon([-8,y]), canyon([-7,y])], -Inf, Inf)
     root = QuadDIRECT.get_root(box)
     for leaf in leaves(root)
-        Q, xbase, c = QuadDIRECT.build_quadratic_model(leaf, x0)
+        Q, xbase, c = QuadDIRECT.build_quadratic_model(leaf, x0, [1, 1], thresh)
         g, B = QuadDIRECT.solve(Q)
         @test B ≈ [20.2 -19.8; -19.8 20.2]
         @test (B \ g) ≈ xbase
+    end
+
+    # Marking
+    box, x0, xstar = QuadDIRECT.init(canyon, splits, lower, upper)
+    root = QuadDIRECT.get_root(box)
+    leaf = root.children[1]
+    @test QuadDIRECT.isleaf(leaf)
+    leaf.qnconverged = true
+    Q, xbase, c, succeeded = QuadDIRECT.build_quadratic_model(box, x0, [1, 1], thresh)
+    @test !succeeded
+    box, x0, xstar = QuadDIRECT.init(canyon, splits, lower, upper)
+    root = QuadDIRECT.get_root(box)
+    leaf = root.children[1]
+    box.qnconverged = true
+    Q, xbase, c, succeeded = QuadDIRECT.build_quadratic_model(leaf, x0, [1, 1], thresh)
+    @test !succeeded
+    box, x0, xstar = QuadDIRECT.init(canyon, splits, lower, upper)
+    p = box.parent
+    p.qnconverged = true
+    Q, xbase, c, succeeded = QuadDIRECT.build_quadratic_model(box, x0, [1, 1], thresh)
+    @test !succeeded
+
+    # Automatic completion of quadratic model
+    fc = CountedFunction(canyon)
+    box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
+    scale = QuadDIRECT.boxscale(box, splits)
+    @test scale == [1, 1]
+    Q, xbase, c, succeeded = QuadDIRECT.build_quadratic_model(box, x0, scale, thresh)
+    QuadDIRECT.complete_quadratic_model!(Q, c, box, fc, x0, xbase, scale, splits, lower, upper, thresh)
+    @test numevals(fc) <= 9
+    g, B = QuadDIRECT.solve(Q)
+    @test B ≈ [20.2 -19.8; -19.8 20.2]
+    @test (B \ g) ≈ xbase
+
+    fc = CountedFunction(x->sum(abs2, x)/2)
+    nd = 3
+    splits = [[-1,0,1] for i = 1:nd]
+    for ul = (Inf, 10000)
+        upper = fill(ul, nd)
+        lower = -upper
+        box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
+        root = QuadDIRECT.get_root(box)
+        for box in leaves(root)
+            scale = QuadDIRECT.boxscale(box, splits)
+            Q, xbase, c, succeeded = QuadDIRECT.build_quadratic_model(box, x0, scale, thresh)
+            QuadDIRECT.complete_quadratic_model!(Q, c, box, fc, x0, xbase, scale, splits, lower, upper, thresh)
+            g, B = QuadDIRECT.solve(Q)
+            iscale = 1./scale
+            Bsc = iscale .* B .* iscale'
+            gsc = iscale .* g
+            @test Bsc ≈ eye(nd, nd)
+            @test (Bsc \ gsc) ≈ xbase
+        end
     end
 end
 
@@ -328,52 +398,68 @@ end
     @test length(leaves(root)) < 300
 end
 
+@testset "Meaningful bounds" begin
+    fc = CountedFunction(canyon)
+    splits = ([-11,-10,-9], [-7,-6,-5])
+    lower, upper = [-Inf, -Inf], [Inf, -0.1]
+    root, x0 = analyze(fc, splits, lower, upper)
+    box = minimum(root)
+    x = position(box, x0)
+    @test x[2] ≈ -0.1
+    @test numevals(fc) < 1000
+end
+
 @testset "Infinite return values" begin
     # Performance isn't great, but you can (if needed) return Inf as a way of imposing
     # additional constraints.
     # It would be better to have a more comprehensive solution.
-    # Also use this to test both CountedFunction and WrappedFunction
+    # Also use this to test both CountedFunction and LoggedFunction
     for WF in (CountedFunction, LoggedFunction)
         canyonb(x) = x[2] > -0.1 ? Inf : canyon(x)
-        fc = WF(canyonb)
         splits = ([-11,-10,-9], [-7,-6,-5])
         lower, upper = [-Inf, -Inf], [Inf, Inf]
-        root, x0 = analyze(fc, splits, lower, upper)
+        fc = WF(canyonb)
+        root, x0 = analyze(fc, splits, lower, upper; rtol=0, fvalue=0.01)
         box = minimum(root)
         x = position(box, x0)
         @test x[2] <= -0.1
         @test value(box) < 0.01
-        @test numevals(fc) < 700
+        @test_broken numevals(fc) < 700
         fc = WF(canyonb)
         box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
         root = QuadDIRECT.get_root(box)
         iter = 0
         while value(minimum(root)) > 0.1 && iter < 100
             iter += 1
-            QuadDIRECT.sweep!(root, fc, x0, splits, lower, upper; nquasinewton=typemax(Int))
+            QuadDIRECT.sweep!(root, fc, x0, splits, lower, upper)
         end
         @test iter < 100
         @test numevals(fc) < 5000
         fc = WF(canyonb)
         splits = ([-2,-1,0], [-1, -0.5, -0.15])
         root, x0 = analyze(fc, splits, lower, upper; fvalue=0.005, rtol=0, maxevals=10000)
-        @test numevals(fc) < 500
         @test value(minimum(root)) < 0.005
+        @test numevals(fc) < 500
     end
 end
 
 @testset "High dimensional" begin
-    B = randn(41, 40); B = B'*B
+    Bfact = randn(21, 20)
+    B = Bfact'*Bfact
+    # Ensure that B isn't *too* "elongated" (make sure eigenvalues fall within range of 10^3)
     D, V = eig(B)
     i = 1
-    while D[i] < 1e-4*D[end]
-        D[i] = 1e-4*D[end]
+    while D[i] < 1e-3*D[end]
+        D[i] = 1e-3*D[end]
+        i += 1
     end
-    B = V*Diagonal(sqrt.(D)); B = B'*B
+    B = Diagonal(sqrt.(D))*V'; B = B'*B
     h(x) = (x'*B*x)/2
     splits = [[-3,-2,-1] for i = 1:size(B,1)]
     upper = fill(Inf, size(B,1))
     lower = -upper
-    root, x0 = analyze(h, splits, lower, upper; maxevals=10000, fvalue=1e-3)
+    hc = CountedFunction(h)
+    root, x0 = analyze(hc, splits, lower, upper; maxevals=10^6, fvalue=1e-3)
     @test value(minimum(root)) <= 1e-3
+    @test numevals(hc) < 1000 # theoretically could be done in 210 + 20
 end

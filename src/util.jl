@@ -37,9 +37,9 @@ function qfit(xfm, xf0, xfp)
 end
 
 @inline function lagrangecoefs(xfm, xf0, xfp)
-    xm, fm = xfm
-    x0, f0 = xf0
-    xp, fp = xfp
+    xm, fm = xfm.first, xfm.second
+    x0, f0 = xf0.first, xf0.second
+    xp, fp = xfp.first, xfp.second
     @assert(xp > x0 && x0 > xm && isfinite(xm) && isfinite(xp))
     cm = fm/((xm-x0)*(xm-xp))  # coefficients of Lagrange polynomial
     c0 = f0/((x0-xm)*(x0-xp))
@@ -94,6 +94,24 @@ function qdelta(box::Box{T}, splitdim::Integer) where T
     return p.parent.splitdim == splitdim ? qdelta(p) : zero(T)
 end
 
+function is_diag_convex(box)
+    # Test whether we're likely to be in a convex patch. This only checks the
+    # diagonals, because that's quick.
+    isdiagconvex = true
+    for i = 1:ndims(box)
+        p = find_parent_with_splitdim(box, i)
+        if isroot(p)
+            isdiagconvex = false
+        else
+            xs, fs = p.parent.xvalues, p.parent.fvalues
+            xvert, fvert, qcoef = qfit(xs[1]=>fs[1], xs[2]=>fs[2], xs[3]=>fs[3])
+            isdiagconvex &= qcoef > 0
+        end
+        isdiagconvex || break
+    end
+    return isdiagconvex
+end
+
 ## Minimum Edge List utilities
 Base.empty!(mel::MELink) = (mel.next = mel; return mel)
 
@@ -117,7 +135,7 @@ Remove entries from `mel` that are worse than `(w, label=>fvalue)`.
 Returns linked-list positions on either side of the putative new value.
 """
 function trim!(mel::MELink, w, lf::Pair)
-    l, f = lf
+    l, f = lf.first, lf.second
     prev, next = mel, mel.next
     while prev != next && w > next.w
         if f <= next.f
@@ -214,7 +232,7 @@ function treeprint(io::IO, f::Function, root::Box)
 end
 treeprint(io::IO, root::Box) = treeprint(io, x->nothing, root)
 
-function add_children!(parent::Box, splitdim, xvalues, fvalues, u::Real, v::Real)
+function add_children!(parent::Box{T}, splitdim, xvalues, fvalues, u::Real, v::Real) where T
     isleaf(parent) || error("cannot add children to non-leaf node")
     (length(xvalues) == 3 && xvalues[1] < xvalues[2] < xvalues[3]) || throw(ArgumentError("xvalues must be monotonic, got $xvalues"))
     parent.splitdim = splitdim
@@ -224,6 +242,12 @@ function add_children!(parent::Box, splitdim, xvalues, fvalues, u::Real, v::Real
     else
         parent.minmax = boxbounds(p)
     end
+    for i = 1:3
+        @assert(parent.minmax[1] <= xvalues[i] <= parent.minmax[2])
+    end
+    minsep = eps(T)*(xvalues[3]-xvalues[1])
+    @assert(xvalues[2]-xvalues[1] > minsep)
+    @assert(xvalues[3]-xvalues[2] > minsep)
     parent.xvalues = xvalues
     parent.fvalues = fvalues
     for i = 1:3
@@ -269,12 +293,12 @@ function find_parent_with_splitdim(box::Box, splitdim::Integer)
 end
 
 """
-    box = find_smallest_child_leaf(root)
+    box = greedy_smallest_child_leaf(root)
 
 Walk the tree recursively, choosing the child with smallest function value at each stage.
 `box` will be a leaf node.
 """
-function find_smallest_child_leaf(box::Box)
+function greedy_smallest_child_leaf(box::Box)
     # Not guaranteed to be the smallest function value, it's the smallest that can be
     # reached stepwise
     while !isleaf(box)
@@ -285,27 +309,27 @@ function find_smallest_child_leaf(box::Box)
 end
 
 """
-    dims_targeted = qtargeted(box, xsource, lower, upper)
+    box = find_smallest_child_leaf(root)
 
-Returns coordinatewise `true` if `xsource` is external to an ancestor of `box`,
-split along the corresponding dimension, that has already been
-targeted as a minimum by a full quadratic model.
+Return the node below `root` with smallest function value.
 """
-function qtargeted(box, xsource, lower, upper)
-    bbs = boxbounds(box, lower, upper)
-    dims_targeted = falses(ndims(box))
-    while true
-        if box.qtargeted
-            if !isinside(xsource, bbs)
-                dims_targeted[box.splitdim] = true
-            end
-        end
-        isroot(box) && return dims_targeted
-        box = box.parent
-        if !isroot(box)
-            bbs[box.parent.splitdim] = boxbounds(box)
+function find_smallest_child_leaf(box::Box)
+    vmin, boxmin = value(box), box
+    for leaf in leaves(box)
+        vleaf = value(leaf)
+        if vleaf <= vmin
+            vmin, boxmin = vleaf, leaf
         end
     end
+    return boxmin
+end
+
+function unique_smallest_leaves(boxes)
+    uboxes = Set{eltype(boxes)}()
+    for box in boxes
+        push!(uboxes, find_smallest_child_leaf(box))
+    end
+    return uboxes
 end
 
 """
@@ -354,7 +378,7 @@ This is a useful utility for finding the neighbor of a given box. Example:
     lnbr = find_leaf_at_edge(root, x, i, -1)
 """
 function find_leaf_at_edge(root::Box, x, splitdim::Integer, dir::Signed)
-    isleaf(root) && return root
+    isleaf(root) && return root, false
     while !isleaf(root)
         i = root.splitdim
         found = false
@@ -505,6 +529,35 @@ function boxbounds!(bb, flag, box::Box, lower, upper)
     boxbounds!(bb, flag, box)
 end
 
+"""
+    scale = boxscale(box, splits)
+
+Return a vector containing a robust measure of the "scale" of `box` along
+each coordinate axis. Specifically, it is typically related to the gap between
+evaluation points of its parent boxes, falling back on the initial user-supplied `splits`
+if it hasn't been split along a particular axis.
+
+Note that a box that extends to infinity still has a finite `scale`. Moreover, a box
+where one evaluation point is at the edge has a scale bigger than zero.
+"""
+function boxscale(box::Box{T,N}, splits) where {T,N}
+    bxscale(s1, s2, s3) = s1 == s2 ? s3 - s2 :
+                          s2 == s3 ? s2 - s1 :
+                          min(s2-s1, s3-s2)
+    bxscale(s) = bxscale(s[1], s[2], s[3])
+    scale = Vector{T}(uninitialized, N)
+    for i = 1:N
+        p = find_parent_with_splitdim(box, i)
+        splitsi = splits[i]
+        if isroot(p)
+            scale[i] = bxscale(splitsi)
+        else
+            scale[i] = bxscale(p.parent.xvalues)
+        end
+    end
+    return scale
+end
+
 function width(box::Box, splitdim::Integer, xdefault::Real, lower::Real, upper::Real)
     p = find_parent_with_splitdim(box, splitdim)
     bb = boxbounds(p, lower, upper)
@@ -545,6 +598,12 @@ function within(x::Real, bb::Tuple{Real,Real}, dir)
     return true
 end
 
+function epswidth(bb::Tuple{T,T}) where T<:Real
+    w1 = isfinite(bb[1]) ? eps(bb[1]) : T(0)
+    w2 = isfinite(bb[2]) ? eps(bb[2]) : T(0)
+    return 10*min(w1, w2)
+end
+
 function count_splits(box::Box)
     nsplits = Vector{Int}(uninitialized, ndims(box))
     count_splits!(nsplits, box)
@@ -577,6 +636,14 @@ function Base.extrema(root::Box)
 end
 
 ## Utilities for experimenting with topology of the tree
+"""
+    splitprint([io::IO], box)
+
+Print a representation of all boxes below `box`, using parentheses prefaced by a number `n`
+to denote a split along dimension `n`, and `l` to represent a leaf.
+
+See also [`parse`](@ref) for the inverse: converting a string representation to a tree of boxes.
+"""
 function splitprint(io::IO, box::Box)
     if isleaf(box)
         print(io, 'l')
@@ -592,22 +659,50 @@ function splitprint(io::IO, box::Box)
 end
 splitprint(box::Box) = splitprint(STDOUT, box)
 
-function splitprint_red(io::IO, box::Box, thisbox::Box)
+"""
+    splitprint_colored([io::IO], box, innerbox)
+
+Like [`splitprint`](@ref), except that `innerbox` is highlighted in red, and the chain
+of parents of `innerbox` are highlighted in cyan.
+"""
+function splitprint_colored(io::IO, box::Box, thisbox::Box, allparents=get_allparents(thisbox))
     if isleaf(box)
         box == thisbox ? print_with_color(:light_red, io, 'l') : print(io, 'l')
     else
-        box == thisbox ? print_with_color(:light_red, io, box.splitdim) : print(io, box.splitdim)
+        if box == thisbox
+            print_with_color(:light_red, io, box.splitdim)
+        elseif box ∈ allparents
+            print_with_color(:cyan, io, box.splitdim)
+        else
+            print(io, box.splitdim)
+        end
         print(io, '(')
-        splitprint_red(io, box.children[1], thisbox)
+        splitprint_colored(io, box.children[1], thisbox, allparents)
         print(io, ", ")
-        splitprint_red(io, box.children[2], thisbox)
+        splitprint_colored(io, box.children[2], thisbox, allparents)
         print(io, ", ")
-        splitprint_red(io, box.children[3], thisbox)
+        splitprint_colored(io, box.children[3], thisbox, allparents)
         print(io, ')')
     end
 end
-splitprint_red(box::Box, thisbox::Box) = splitprint_red(STDOUT, box, thisbox)
+splitprint_colored(box::Box, thisbox::Box) = splitprint_colored(STDOUT, box, thisbox)
 
+function get_allparents(box)
+    allparents = Set{typeof(box)}()
+    p = box
+    while !isroot(p)
+        p = parent(p)
+        push!(allparents, p)
+    end
+    allparents
+end
+
+"""
+    root = parse(Box{T,N}, string)
+
+Parse a `string`, in the output format of [`splitprint`](@ref), and generate
+a tree of boxes with that structure.
+"""
 function Base.parse(::Type{B}, str::AbstractString) where B<:Box
     b = B()
     splitbox!(b, str)
@@ -648,6 +743,12 @@ function splitbox!(box::Box, str::AbstractString)
 end
 
 ## Tree traversal
+
+"""
+    root = get_root(box)
+
+Return the root node for `box`.
+"""
 function get_root(box::Box)
     while !isroot(box)
         box = parent(box)
@@ -706,6 +807,7 @@ end
 
 function up(box, root)
     local i
+    box == root && return (box, length(box.children)+1)
     while true
         box, i = box.parent, box.parent_cindex+1
         box == root && return (box, i)
@@ -783,7 +885,8 @@ end
 
 function ensure_distinct(x::T, x1, x2, bb::Tuple{Real,Real}; minfrac = 0.1) where T
     x1, x2 = lohi(x1, x2)
-    Δxmin = minfrac*(x2-x1)
+    Δxmin = minfrac*min(x2-x1, bb[2] == x2 ? T(Inf) : bb[2]-x2, bb[1] == x1 ? T(Inf) : x1-bb[1])
+    @assert(Δxmin > 0)
     if abs(x - x1) < Δxmin
         s = x == x1 ? 1 : sign(x-x1)
         x = T(max(bb[1], x1 + Δxmin*s))
@@ -835,6 +938,77 @@ function pathlength_hyperplane_intersect(x0, dx, xtarget, tmax)
     t, intersectdim
 end
 
+# function different_basins(boxes::AbstractVector{B}, x0, lower, upper) where B<:Box
+#     basinboxes = B[]
+#     for box in boxes
+#         ubasin = true
+#         for bbox in basinboxes
+#             if !is_different_basin(box, bbox, x0, lower, upper)
+#                 ubasin = false
+#                 break
+#             end
+#         end
+#         if ubasin
+#             push!(basinboxes, box)
+#         end
+#     end
+#     return basinboxes
+# end
+
+# function is_different_basin(box1, box2, x0, lower, upper)
+#     # This convexity test has its limits: we're comparing the maximum along the secant
+#     # within the box to a function value calculated at a point that isn't along the secant.
+#     # False positives happen, but this is better than false negatives.
+#     root = get_root(box1)
+#     v1, v2 = value(box1), value(box2)
+#     x1, x2 = position(box1, x0), position(box2, x0)
+#     dx = x2 - x1
+#     bb = boxbounds(box1, lower, upper)
+#     flag = Vector{Bool}(uninitialized, length(lower))
+#     leaf = box1
+#     t, exitdim = pathlength_box_exit(x1, dx, bb)
+#     # For consistency (e.g., commutivity with box1 and box2), we have to check
+#     # exit condition even at first box, even though it's likely a false positive.
+#     vmax = v1 + t*(v2-v1)
+#     qdtot = oftype(vmax, 0)
+#     # for i = 1:ndims(leaf)   # commented out to avoid false negatives
+#     #     qdtot += qdelta(leaf, i)
+#     # end
+#     if value(leaf)+qdtot > vmax
+#         return true
+#     end
+#     while t < 1
+#         x2[:] .= x1 .+ t.*dx
+#         x2[exitdim] = bb[exitdim][dx[exitdim] > 0 ? 2 : 1]  # avoid roundoff error in the critical coordinate
+#         leaf_old = leaf
+#         leaf, success = find_leaf_at_edge(root, x2, exitdim, dx[exitdim] > 0 ? +1 : -1)
+#         success || break
+#         boxbounds!(bb, flag, leaf, lower, upper)
+#         tnext, exitdim = pathlength_box_exit(x1, dx, bb)
+#         tnext = max(tnext, t)
+#         while tnext == t  # must have hit a corner
+#             tnext += oftype(t, 1e-4)
+#             x2[:] .= x1 .+ tnext.*dx
+#             bxtmp = find_leaf_at(root, x2)
+#             boxbounds!(bb, flag, bxtmp, lower, upper)
+#             tnext, exitdim = pathlength_box_exit(x1, dx, bb)
+#         end
+#         vmax = v1 + t*(v2-v1)
+#         if tnext < 1
+#             vmax = max(vmax, v1 + tnext*(v2-v1))
+#         end
+#         qdtot = oftype(vmax, 0)
+#         # for i = 1:ndims(leaf)
+#         #     qdtot += qdelta(leaf, i)
+#         # end
+#         if value(leaf)+qdtot > vmax
+#             return true
+#         end
+#         t = tnext
+#     end
+#     return false
+# end
+
 """
     a, b, c = pick3(a, b, (lower::Real, upper::Real))
 
@@ -851,4 +1025,12 @@ function pick3(a, b, bb)
         return a, b, b+2*(b-a)
     end
     return a, b, c = lohi(a, b, (imin+imax)/2)
+end
+
+function issame(x1, x2, scale, rtol=sqrt(eps(eltype(x1))))
+    same = true
+    for i = 1:length(x1)
+        same &= abs(x1[i] - x2[i]) < rtol*scale[i]
+    end
+    return same
 end
