@@ -1,4 +1,4 @@
-using PyPlot, Colors, PerceptualColourMaps, Compat
+using PyPlot, Colors, PerceptualColourMaps
 using QuadDIRECT
 using QuadDIRECT: Box
 
@@ -10,7 +10,7 @@ widenbounds(b) = (Δx = 0.1*(b[2]-b[1]); return (b[1]-Δx, b[2]+Δx))
 
 function plotbounds(root::Box{T,2}, x0, lower, upper) where T
     xbounds, ybounds = (Inf, -Inf), (Inf, -Inf)
-    bb = Vector{Tuple{T,T}}(uninitialized, 2)
+    bb = Vector{Tuple{T,T}}(undef, 2)
     x = [NaN, NaN]
     flag = [false, false]
     for box in leaves(root)

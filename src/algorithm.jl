@@ -77,7 +77,7 @@ function autosplit!(box::Box{T}, mes::Vector{<:MELink}, f::WrappedFunction, x0, 
     if splitdim == 0
         # If we entered this box from a neighbor, just choose an axis that has been split the least
         nsplits = count_splits(box)
-        splitdim = indmin(nsplits)
+        splitdim = argmin(nsplits)
         if nsplits[splitdim] > 0
             # If all dimensions have been split, prefer splitting unbounded dimensions
             bbs = boxbounds(box, lower, upper)
@@ -216,11 +216,11 @@ function quasinewton!(box::Box{T}, B, g, c, scale, f::Function, x0, lower, upper
     fbox = fmin = value(box)
     isfinite(fbox) || return box, fmin, T(0)
     # Solve the bounded linear least-squares problem forcing B to be positive-definite
-    cB = cholfact(Positive, B)
+    cB = cholesky(Positive, B)
     Δx = -(cB \ g)   # unconstrained solution
     lsc, usc = (lower.-x)./scale, (upper.-x)./scale
     Δx[:] .= clamp.(Δx, lsc, usc)
-    Δx = lls_bounded!(Δx, full(cB), g, lsc, usc)
+    Δx = lls_bounded!(Δx, Matrix(cB), g, lsc, usc)
     # Test whether the update moves the point appreciably. If not, mark this point
     # as converged.
     issame = true
@@ -298,7 +298,7 @@ function quasinewton!(box::Box{T}, B, g, c, scale, f::Function, x0, lower, upper
         end
         split!(leaf, f, xleaf, imin, MVector3{T}(a, b, c), bb..., xleaf[imin], value(leaf))
         fmin = min(fmin, minimum(leaf.fvalues))
-        childindex = findfirst(equalto(xt), leaf.xvalues)
+        childindex = findfirst(isequal(xt), leaf.xvalues)
         leaf = leaf.children[childindex]
         isfinite(value(leaf)) || return leaf, fmin, T(0)
         dims_targeted[imin] = true
@@ -321,7 +321,7 @@ lls_bounded!(x::VT, H::AbstractMatrix{T}, f::VT, lower::V, upper::V, tol = sqrt(
     lls_bounded!(x, H, f, lower, upper, zeros(T, length(f)), tol)
 
 function lls_bounded!(x::VT, H::AbstractMatrix{T}, f::VT, lower::V, upper::V, g::VT, tol = sqrt(eps(T))) where {T,VT<:AbstractVector{T},V<:AbstractVector}
-    assert_oneindexed(A) = @assert(all(r->first(r)==1, Compat.axes(A)))
+    assert_oneindexed(A) = @assert(all(r->first(r)==1, axes(A)))
     assert_oneindexed(x); assert_oneindexed(H); assert_oneindexed(f); assert_oneindexed(lower)
     assert_oneindexed(upper); assert_oneindexed(g)
     m, n = size(H)
@@ -331,7 +331,7 @@ function lls_bounded!(x::VT, H::AbstractMatrix{T}, f::VT, lower::V, upper::V, g:
     niter = 0
     while niter <= 1000
         # Once per iter, calculate gradient freshly to avoid accumulation of roundoff
-        A_mul_B!(g, H, x)
+        mul!(g, H, x)
         for i = 1:n
             g[i] += f[i]
         end
@@ -365,7 +365,7 @@ function minimum_edges(root::Box{T,N}, x0, lower, upper, minwidth=zeros(eltype(x
     # model, we'll need (N+1)*(N+2)÷2 independent points, so prioritze splitting
     # boxes so that each coordinate has at least 1/Nth of the requisite number of splits.
     nthresh = ceil(Int, (((N+1)*(N+2))÷2)/N)
-    nsplits = Vector{Int}(uninitialized, N)
+    nsplits = Vector{Int}(undef, N)
     for box in leaves(root)
         box.qnconverged && continue
         fval = value(box)
