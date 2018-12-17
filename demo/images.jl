@@ -10,7 +10,7 @@
 # You could make this more efficient by using Fourier methods to compute the ideal
 # translation given any rotation. But the point here is to illustrate the brute-force approach.
 
-using Images, TestImages, CoordinateTransformations, QuadDIRECT, Base.Test
+using Images, TestImages, CoordinateTransformations, QuadDIRECT, Test
 
 # Takes a parameter vector `x` and returns a rigid transformation
 function tfmx(x, img)
@@ -27,17 +27,17 @@ end
 
 function mismatch(img1, img2)
     # Compute the mismatch over the indices that the two images have in common
-    inds1, inds2 = indices(img1), indices(img2)
+    inds1, inds2 = axes(img1), axes(img2)
     inds = (intersect(inds1[1], inds2[1]), intersect(inds1[2], inds2[2]))
     (isempty(inds[1]) || isempty(inds[2])) && return Inf
     val = 0.0
     counter = 0
     for x in inds[2], y in inds[1]
-	v1, v2 = img1[y, x], img2[y, x]
-	if !isnan(v1) && !isnan(v2)
-	    val += abs2(v1-v2)
-	    counter += 1
-	end
+    v1, v2 = img1[y, x], img2[y, x]
+    if !isnan(v1) && !isnan(v2)
+        val += abs2(v1-v2)
+        counter += 1
+    end
     end
     counter == 0 && return Inf
     # This is like "nanmean"
@@ -65,7 +65,7 @@ minwidth = [1, 1, 0.02]
 # Simple iterative analysis
 root, x0 = analyze(f, splits, lower, upper; maxevals=10, minwidth=minwidth)
 # Iterative refinement with control over convergence. `fvalue=0.02` forces it to keep looking until it finds something good.
-warn("This will take a long time")
+@warn("This will take a long time")
 root = analyze!(root, f, x0, splits, lower, upper; maxevals=10000, fvalue=0.01, rtol=0, minwidth=minwidth, print_interval=100)
 
 box = minimum(root)

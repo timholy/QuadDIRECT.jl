@@ -11,7 +11,7 @@ Solve a quadratic model `Q` for the gradient `g` and Hessian `B`. See
 function solve(Q::QmIGE{T,N}) where {T,N}
     # Importantly, this defines the storage order in Q
     gB = LowerTriangular(Q.coefs) \ Q.rhs
-    g, B = Vector{T}(uninitialized, N), Matrix{T}(uninitialized, N, N)
+    g, B = Vector{T}(undef, N), Matrix{T}(undef, N, N)
     k = 0
     dimpiv = Q.dimpiv
     for i = 1:N
@@ -357,7 +357,7 @@ function descend!(Q::QmIGE, c, box, x0, xbase, Δx, flag, bbs, scale, thresh, sk
     end
     # Recursively add all children
     if !isleaf(box)
-        iskip = findfirst(equalto(thisx), box.xvalues)
+        iskip = findfirst(isequal(thisx), box.xvalues)
         for i = 1:3
             descend!(Q, c, box.children[i], x0, xbase, Δx, flag, bbs, scale, thresh, i==iskip) || return false
         end
@@ -453,13 +453,13 @@ function swap!(store, x, i)
     x, store[i] = store[i], x
     return x
 end
-swap!(::Any, ::Void, i) = nothing
+swap!(::Any, ::Nothing, i) = nothing
 
 store!(store, x, i) = store[i] = x
-store!(::Any, ::Void, i) = nothing
+store!(::Any, ::Nothing, i) = nothing
 
 subtract(rhs, c, i, newrhs) = newrhs - c*rhs[i]
-subtract(rhs, c, i, ::Void) = nothing
+subtract(rhs, c, i, ::Nothing) = nothing
 
 
 function setrow!(rowtmp, dimpiv, Δx, ndims, splitdim)

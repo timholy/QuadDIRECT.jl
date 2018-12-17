@@ -27,7 +27,7 @@ end
 
 MELink{Tw,Tf}(dummylabel::Tl) where {Tl,Tw,Tf} = MELink{Tl,Tw,Tf}(dummylabel, typemin(Tw), typemin(Tf))
 
-Base.iteratorsize(::Type{<:MELink}) = Base.SizeUnknown()
+Base.IteratorSize(::Type{<:MELink}) = Base.SizeUnknown()
 
 # Mutable length-3 vector without the storage overhead of Array
 mutable struct MVector3{T} <: AbstractVector{T}
@@ -35,9 +35,11 @@ mutable struct MVector3{T} <: AbstractVector{T}
     x2::T
     x3::T
 end
+MVector3{T}(a::AbstractVector) where T = convert(MVector3{T}, a)
+
 Base.IndexStyle(::Type{<:MVector3}) = IndexLinear()
 Base.size(v::MVector3) = (3,)
-Base.indices1(v::MVector3) = Base.OneTo(3)
+Base.axes1(v::MVector3) = Base.OneTo(3)
 function Base.getindex(v::MVector3, i::Int)
     @boundscheck ((1 <= i) & (i <= 3)) || Base.throw_boundserror(v, i)
     ifelse(i == 1, v.x1, ifelse(i == 2, v.x2, v.x3))
@@ -55,7 +57,7 @@ function Base.setindex!(v::MVector3, val, i::Int)
 end
 Base.convert(::Type{MVector3{T}}, a::MVector3{T}) where T = a
 function Base.convert(::Type{MVector3{T}}, a::AbstractVector) where T
-    @boundscheck indices(a) == (Base.OneTo(3),) || throw(DimensionMismatch("vector must have length 3"))
+    @boundscheck axes(a) == (Base.OneTo(3),) || throw(DimensionMismatch("vector must have length 3"))
     @inbounds ret = MVector3{T}(a[1], a[2], a[3])
     return ret
 end
@@ -63,7 +65,7 @@ Base.convert(::Type{MVector3}, a::AbstractVector{T}) where T =
     convert(MVector3{T}, a)
 
 Base.similar(::MVector3{T}, ::Type{S}, dims::Tuple{Vararg{Int}}) where {T,S} =
-    Array{S}(uninitialized, dims)
+    Array{S}(undef, dims)
 
 boxeltype(::Type{<:Integer}) = Float64
 boxeltype(::Type{T}) where T = T
@@ -109,7 +111,7 @@ isroot(box::Box) = box.parent == box
 isleaf(box::Box) = box.splitdim == 0
 Base.parent(box::Box) = box.parent
 Base.ndims(box::Box{T,N}) where {T,N} = N
-Base.iteratorsize(::Type{<:Box}) = Base.SizeUnknown()
+Base.IteratorSize(::Type{<:Box}) = Base.SizeUnknown()
 
 abstract type WrappedFunction <: Function end
 
@@ -165,6 +167,6 @@ function QmIGE{T,N}() where {T,N}
     rowtmp = zeros(T, m)
     dimpiv = zeros(Int, N)
     rowzero = fill(true, m)
-    rowbox = Vector{Box{T,N}}(uninitialized, m)
+    rowbox = Vector{Box{T,N}}(undef, m)
     QmIGE{T,N}(coefs, rhs, dimpiv, rowzero, rowbox, Ref(0), Ref(0), rowtmp)
 end

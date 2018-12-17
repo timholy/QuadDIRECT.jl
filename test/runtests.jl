@@ -1,5 +1,5 @@
-using QuadDIRECT, StaticArrays
-using Base.Test
+using QuadDIRECT, StaticArrays, LinearAlgebra
+using Test
 
 @testset "Bounded least squares" begin
     B = [1 -0.2; -0.2 2]
@@ -60,11 +60,11 @@ end
     l = sortperm(w)
     w = w[l]
     y = y[l]
-    state = start(me)
+    ret = iterate(me)
     i = 1
     ntests = 0
-    while !done(me, state)
-        item, state = next(me, state)
+    while ret !== nothing
+        item, state = ret
         while i <= length(w) && w[i] <= item.w
             ntests += 1
             @test y[i] >= item.f
@@ -73,6 +73,7 @@ end
             end
             i += 1
         end
+        ret = iterate(me, state)
     end
     @test ntests > 1
     @test i == 21
@@ -271,7 +272,7 @@ end
     @test succeeded
     @test xbase == xstar
     @test c == canyon(xstar)
-    @test_throws Base.LinAlg.SingularException QuadDIRECT.solve(Q)
+    @test_throws LinearAlgebra.SingularException QuadDIRECT.solve(Q)
     y = xstar[2]
     QuadDIRECT.add_children!(box, 1, [xstar[1], -8, -7],
                              [canyon([xstar[1],y]), canyon([-8,y]), canyon([-7,y])], -Inf, Inf)
@@ -328,10 +329,10 @@ end
             Q, xbase, c, succeeded = QuadDIRECT.build_quadratic_model(box, x0, scale, thresh)
             QuadDIRECT.complete_quadratic_model!(Q, c, box, fc, x0, xbase, scale, splits, lower, upper, thresh)
             g, B = QuadDIRECT.solve(Q)
-            iscale = 1./scale
+            iscale = 1 ./ scale
             Bsc = iscale .* B .* iscale'
             gsc = iscale .* g
-            @test Bsc ≈ eye(nd, nd)
+            @test Bsc ≈ Matrix(I, nd, nd)
             @test (Bsc \ gsc) ≈ xbase
         end
     end
@@ -431,6 +432,7 @@ end
         iter = 0
         while value(minimum(root)) > 0.1 && iter < 100
             iter += 1
+
             QuadDIRECT.sweep!(root, fc, x0, splits, lower, upper)
         end
         @test iter < 100
@@ -447,7 +449,7 @@ end
     Bfact = randn(21, 20)
     B = Bfact'*Bfact
     # Ensure that B isn't *too* "elongated" (make sure eigenvalues fall within range of 10^3)
-    D, V = eig(B)
+    D, V = eigen(B)
     i = 1
     while D[i] < 1e-3*D[end]
         D[i] = 1e-3*D[end]

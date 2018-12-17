@@ -1,4 +1,4 @@
-using GAMSFiles, QuadDIRECT, ProgressMeter, Compat
+using GAMSFiles, QuadDIRECT, ProgressMeter
 
 struct ProblemInfo
     smoothness::String
@@ -57,10 +57,10 @@ end
 
 function read_problemdata(file)
     lower, upper, x0 = open(file) do io
-        values = split(readstring(io))
+        values = split(read(io, String))
         k = 1
         nvars = parse(Int, values[1])
-        lower = Vector{Float64}(uninitialized, nvars)
+        lower = Vector{Float64}(undef, nvars)
         upper = similar(lower)
         x0 = similar(lower)
         for i = 1:nvars
@@ -162,7 +162,7 @@ for dir in gamsdirs
                 end
                 push!(failures, fullfile)
                 println("\nfailed on ", fullfile)
-                println("problemdata axes ", Compat.axes(x0), ", and from the file it's ", Compat.axes(x0g))
+                println("problemdata axes ", axes(x0), ", and from the file it's ", axes(x0g))
                 showerror(STDOUT, ex)
                 println()
             end

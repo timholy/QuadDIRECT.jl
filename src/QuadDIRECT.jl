@@ -1,9 +1,7 @@
-__precompile__(true)
-
 module QuadDIRECT
 
+using LinearAlgebra
 using StaticArrays, PositiveFactorizations
-using Compat
 
 export Box, CountedFunction, LoggedFunction
 export leaves, value, numevals, analyze, analyze!, minimize

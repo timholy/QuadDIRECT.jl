@@ -166,9 +166,14 @@ function Base.insert!(mel::MELink, w, lf::Pair)
     return mel
 end
 
-Base.start(mel::MELink) = mel
-Base.done(mel::MELink, state::MELink) = state == state.next
-Base.next(mel::MELink, state::MELink) = (state.next, state.next)
+function Base.iterate(mel::MELink)
+    mel == mel.next && return nothing
+    return (mel.next, mel.next)
+end
+function Base.iterate(mel::MELink, state::MELink)
+    state == state.next && return nothing
+    return (state.next, state.next)
+end
 
 function popfirst!(mel::MELink)
     item = mel.next
@@ -302,7 +307,7 @@ function greedy_smallest_child_leaf(box::Box)
     # Not guaranteed to be the smallest function value, it's the smallest that can be
     # reached stepwise
     while !isleaf(box)
-        idx = indmin(box.fvalues)
+        idx = argmin(box.fvalues)
         box = box.children[idx]
     end
     box
@@ -413,7 +418,7 @@ function Base.position(box::Box, x0::AbstractVector)
     position!(x, flag, box, x0)
 end
 function position!(x, flag, box::Box, x0::AbstractVector)
-    copy!(x, x0)
+    copyto!(x, x0)
     position!(x, flag, box)
 end
 function position!(x, box::Box)
@@ -545,7 +550,7 @@ function boxscale(box::Box{T,N}, splits) where {T,N}
                           s2 == s3 ? s2 - s1 :
                           min(s2-s1, s3-s2)
     bxscale(s) = bxscale(s[1], s[2], s[3])
-    scale = Vector{T}(uninitialized, N)
+    scale = Vector{T}(undef, N)
     for i = 1:N
         p = find_parent_with_splitdim(box, i)
         splitsi = splits[i]
@@ -605,7 +610,7 @@ function epswidth(bb::Tuple{T,T}) where T<:Real
 end
 
 function count_splits(box::Box)
-    nsplits = Vector{Int}(uninitialized, ndims(box))
+    nsplits = Vector{Int}(undef, ndims(box))
     count_splits!(nsplits, box)
 end
 
@@ -657,7 +662,7 @@ function splitprint(io::IO, box::Box)
         print(io, ')')
     end
 end
-splitprint(box::Box) = splitprint(STDOUT, box)
+splitprint(box::Box) = splitprint(stdout, box)
 
 """
     splitprint_colored([io::IO], box, innerbox)
@@ -667,12 +672,12 @@ of parents of `innerbox` are highlighted in cyan.
 """
 function splitprint_colored(io::IO, box::Box, thisbox::Box, allparents=get_allparents(thisbox))
     if isleaf(box)
-        box == thisbox ? print_with_color(:light_red, io, 'l') : print(io, 'l')
+        box == thisbox ? printstyled(io, 'l', color=:light_red) : print(io, 'l')
     else
         if box == thisbox
-            print_with_color(:light_red, io, box.splitdim)
+            printstyled(io, box.splitdim, color=:light_red)
         elseif box ∈ allparents
-            print_with_color(:cyan, io, box.splitdim)
+            printstyled(io, box.splitdim, color=:cyan)
         else
             print(io, box.splitdim)
         end
@@ -685,7 +690,7 @@ function splitprint_colored(io::IO, box::Box, thisbox::Box, allparents=get_allpa
         print(io, ')')
     end
 end
-splitprint_colored(box::Box, thisbox::Box) = splitprint_colored(STDOUT, box, thisbox)
+splitprint_colored(box::Box, thisbox::Box) = splitprint_colored(stdout, box, thisbox)
 
 function get_allparents(box)
     allparents = Set{typeof(box)}()
@@ -725,9 +730,9 @@ function splitbox!(box::Box, str::AbstractString)
     commapos = [0,0]
     commaidx = 0
     open = 0
-    i = start(dimstr)
-    while !done(dimstr, i)
-        c, i = next(dimstr, i)
+    i = firstindex(dimstr)
+    while i <= ncodeunits(dimstr)
+        c, i = iterate(dimstr, i)
         if c == '('
             open += 1
         elseif c == ')'
@@ -757,7 +762,7 @@ function get_root(box::Box)
 end
 
 abstract type DepthFirstIterator end
-Base.iteratorsize(::Type{<:DepthFirstIterator}) = Base.SizeUnknown()
+Base.IteratorSize(::Type{<:DepthFirstIterator}) = Base.SizeUnknown()
 
 struct DepthFirstLeafIterator{B<:Box} <: DepthFirstIterator
     root::B
@@ -834,7 +839,7 @@ replacecoordinate!(x::SVector{N,T}, i::Integer, val) where {N,T} =
 @inline _rpc(t, i, val) = (ifelse(i == 0, val, t[1]), _rpc(Base.tail(t), i-1, val)...)
 _rps(::Tuple{}, i, val) = ()
 
-ipcopy!(dest, src) = copy!(dest, src)
+ipcopy!(dest, src) = copyto!(dest, src)
 ipcopy!(dest::SVector, src) = src
 
 ## Other utilities
@@ -964,7 +969,7 @@ end
 #     x1, x2 = position(box1, x0), position(box2, x0)
 #     dx = x2 - x1
 #     bb = boxbounds(box1, lower, upper)
-#     flag = Vector{Bool}(uninitialized, length(lower))
+#     flag = Vector{Bool}(undef, length(lower))
 #     leaf = box1
 #     t, exitdim = pathlength_box_exit(x1, dx, bb)
 #     # For consistency (e.g., commutivity with box1 and box2), we have to check
