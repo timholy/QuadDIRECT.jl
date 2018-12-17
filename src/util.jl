@@ -768,46 +768,46 @@ struct DepthFirstLeafIterator{B<:Box} <: DepthFirstIterator
     root::B
 end
 
-struct VisitorBool{B<:Box}
-    box::B
-    done::Bool
-end
-
 function leaves(root::Box)
     DepthFirstLeafIterator(root)
 end
 
-function Base.start(iter::DepthFirstLeafIterator)
-    find_next_leaf(iter, VisitorBool(iter.root, false))
+function Base.iterate(iter::DepthFirstLeafIterator)
+    state = find_next_leaf(iter, iter.root)
+    state === nothing && return nothing
+    return state, state
 end
-Base.start(root::Box) = VisitorBool(root, false)
+Base.iterate(root::Box) = root, root
 
-Base.done(iter::DepthFirstLeafIterator, state::VisitorBool) = state.done
-Base.done(root::Box, state::VisitorBool) = state.done
-
-function Base.next(iter::DepthFirstLeafIterator, state::VisitorBool)
-    @assert(isleaf(state.box))
-    return (state.box, find_next_leaf(iter, state))
+function Base.iterate(iter::DepthFirstLeafIterator, state::Box)
+    @assert(isleaf(state))
+    state = find_next_leaf(iter, state)
+    state === nothing && return nothing
+    return (state, state)
 end
-function find_next_leaf(iter::DepthFirstLeafIterator, state::VisitorBool)
-    _, state = next(iter.root, state)
-    while !isleaf(state.box) && !state.done
-        _, state = next(iter.root, state)
+function find_next_leaf(iter::DepthFirstLeafIterator, state::Box)
+    ret = iterate(iter.root, state)
+    ret === nothing && return nothing
+    while !isleaf(ret[1])
+        ret = iterate(iter.root, ret[2])
+        ret === nothing && return nothing
     end
-    return state
+    return ret[2]
 end
 
-function Base.next(root::Box, state::VisitorBool)
-    item, done = state.box, state.done
+function Base.iterate(root::Box, state::Box)
+    item = state  # old item
     if isleaf(item)
         box, i = up(item, root)
         if i <= length(box.children)
-            return (item, VisitorBool(box.children[i], false))
+            item = box.children[i]
+            return (item, item)
         end
         @assert(box == root)
-        return (item, VisitorBool(root, true))
+        return nothing
     end
-    return (item, VisitorBool(item.children[1], false))
+    item = item.children[1]
+    return (item, item)
 end
 
 function up(box, root)
@@ -822,13 +822,14 @@ function up(box, root)
 end
 
 function Base.length(iter::DepthFirstLeafIterator)
-    state = start(iter)
+    ret = iterate(iter)
     len = 0
-    while !done(iter, state)
-        _, state = next(iter, state)
+    while ret !== nothing
+        item, state = ret
+        ret = iterate(iter, state)
         len += 1
     end
-    len
+    return len
 end
 
 ## Utilities for working with both mutable and immutable vectors
