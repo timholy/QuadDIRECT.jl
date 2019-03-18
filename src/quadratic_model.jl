@@ -213,7 +213,8 @@ function complete_quadratic_model!(Q::QmIGE, c, box::Box{T,N}, f::Function, x0, 
                 # Check that the box is big enough to split along this dimension
                 if !isroot(p)
                     bb = boxbounds(p)
-                    if !(bb[2] - bb[1] > epswidth(bb))
+                    bbeps = epswidth(bb)
+                    if !(bb[2] - bb[1] > bbeps) || !(bb[2] - xtmp[splitdim] > bbeps) || !(xtmp[splitdim] - bb[1] > bbeps)
                         return Q  # fail (FIXME?)
                     end
                 end
