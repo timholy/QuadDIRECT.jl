@@ -136,6 +136,7 @@ function complete_quadratic_model!(Q::QmIGE, c, box::Box{T,N}, f::Function, x0, 
             elseif xcur >= u
                 u, xcur = xcur, (l + xcur)/2
             end
+            abs(u-l) < epswidth((l, u)) && return Q #FIXME?
             split!(box, f, xtmp, splitdim, MVector3{T}(l, xcur, u), lower[splitdim], upper[splitdim], xcur, value(box))
             xcur = xbase[splitdim]
             j = 3
