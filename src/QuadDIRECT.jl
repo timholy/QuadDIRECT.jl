@@ -14,8 +14,8 @@ include("algorithm.jl")
 
 # Convenience methods
 function analyze(f, x0::AbstractVector{<:Real}, lower::AbstractVector{<:Real}, upper::AbstractVector{<:Real}; kwargs...)
-    inds = linearindices(x0)
-    linearindices(lower) == linearindices(upper) == inds || error("lengths must match")
+    inds = LinearIndices(x0)
+    LinearIndices(lower) == LinearIndices(upper) == inds || error("lengths must match")
     splits = similar(x0, Vector{Float64})
     for i in inds
         lo, hi, xi = lower[i], upper[i], x0[i]
