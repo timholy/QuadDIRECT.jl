@@ -465,3 +465,11 @@ end
     @test value(minimum(root)) <= 1e-3
     @test numevals(hc) < 1000 # theoretically could be done in 210 + 20
 end
+
+@testset "Convenience" begin
+    fc = CountedFunction(canyon)
+    x0 = [-10,-6]
+    lower, upper = [-12, -12], [12, 12]
+    root, x0′ = analyze(fc, x0, lower, upper)
+    @test value(minimum(root)) < 1e-8
+end
