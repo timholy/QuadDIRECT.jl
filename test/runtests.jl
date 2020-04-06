@@ -425,7 +425,7 @@ end
         x = position(box, x0)
         @test x[2] <= -0.1
         @test value(box) < 0.01
-        @test_broken numevals(fc) < 700
+        @test_skip numevals(fc) < 700
         fc = WF(canyonb)
         box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
         root = QuadDIRECT.get_root(box)
