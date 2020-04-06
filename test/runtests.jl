@@ -425,7 +425,7 @@ end
         x = position(box, x0)
         @test x[2] <= -0.1
         @test value(box) < 0.01
-        @test_broken numevals(fc) < 700
+        @test_skip numevals(fc) < 700
         fc = WF(canyonb)
         box, x0, xstar = QuadDIRECT.init(fc, splits, lower, upper)
         root = QuadDIRECT.get_root(box)
@@ -464,4 +464,12 @@ end
     root, x0 = analyze(hc, splits, lower, upper; maxevals=10^6, fvalue=1e-3)
     @test value(minimum(root)) <= 1e-3
     @test numevals(hc) < 1000 # theoretically could be done in 210 + 20
+end
+
+@testset "Convenience" begin
+    fc = CountedFunction(canyon)
+    x0 = [-10,-6]
+    lower, upper = [-12, -12], [12, 12]
+    root, x0′ = analyze(fc, x0, lower, upper)
+    @test value(minimum(root)) < 1e-8
 end
