@@ -1,7 +1,7 @@
 name = "QuadDIRECT"
 uuid = "dae52e8d-d666-5120-a592-9e15c33b8d7a"
 authors = ["Tim Holy <tim.holy@gmail.com>"]
-version = "0.1.1"
+version = "0.1.2"
 
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
