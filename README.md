@@ -1,8 +1,9 @@
 # QuadDIRECT
 
-[![Build Status](https://travis-ci.org/timholy/QuadDIRECT.jl.svg?branch=master)](https://travis-ci.org/timholy/QuadDIRECT.jl)
-
+[![CI](https://github.com/timholy/QuadDIRECT.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/timholy/QuadDIRECT.jl/actions/workflows/ci.yml)
 [![codecov.io](http://codecov.io/github/timholy/QuadDIRECT.jl/coverage.svg?branch=master)](http://codecov.io/github/timholy/QuadDIRECT.jl?branch=master)
+
+**This package is registered in [HolyLabRegistry](https://github.com/HolyLab/HolyLabRegistry)---you'll likely want to add that as an additional registry.**
 
 QuadDIRECT is an algorithm for global optimization without requiring derivatives. It was inspired by [DIRECT](https://www.tol-project.org/export/3756/tolp/OfficialTolArchiveNetwork/NonLinGloOpt/doc/DIRECT_Lipschitzian%20optimization%20without%20the%20lipschitz%20constant.pdf) and [MCS](http://www.mat.univie.ac.at/~Neum/ms/mcs.pdf):
 
